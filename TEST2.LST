@@ -1,0 +1,753 @@
+Microsoft (R) Macro Assembler Version 6.11		    11/11/18 17:08:03
+DOSTUNES						     Page 1 - 1
+
+
+				TITLE DOSTUNES
+
+				INCLUDE cs240.inc
+			      C .NOLIST
+			      C .LIST
+			      C 
+				.386
+
+ = 4C00				DOSEXIT			= 4C00h
+ = 0021				DOS			= 21h
+ = 0010				BIOS			= 10h
+
+ = 001234DC			FREQUENCY		= 1193180
+ = 00B6				READY_TIMER		= 0B6h
+ = 0042				TIMER_DATA_PORT		= 42h
+ = 0043				TIMER_CONTROL_PORT	= 43h
+ = 0061				SPEAKER_PORT		= 61h
+
+ = 3D00				OPENFILE 		= 3D00h
+ = 3F00				READFILE 		= 3F00h
+ = 3E00				CLOSEFILE 		= 3E00h
+ = 6200				PSP 			= 6200h
+ = 0080				CMDTAIL 		= 80h
+
+
+ 0000				.data
+
+ 0000  0078 [			cmdbuffer               WORD 120 dup(0)
+        0000
+       ]
+ 00F0 0000			filehandle              WORD ?
+ 00F2 000A			buffsize                WORD 10
+ 00F4  000A [			buffer                  BYTE 10 dup(0)
+        00
+       ]
+ 00FE 00			tempo			BYTE 0
+ 00FF  000A [			garbageBuffer		BYTE 10 dup(0)
+        00
+       ]
+ 0109 0000			bytesread               WORD ?
+
+ 010B 0000			WAITTIME                WORD 0
+ 010D 0000			LINECOUNT               WORD 0
+ 010F 0000			Full_Tempo              WORD 0
+ 0111  0104 [			filename	        BYTE 260 dup(0)
+        00
+       ]
+
+ 0215 45 72 72 6F 72 20		error   		BYTE "Error finding the file", 0
+       66 69 6E 64 69 6E
+       67 20 74 68 65 20
+       66 69 6C 65 00
+
+
+ 022C 54BE 4FFC 59C8		A1                      WORD  54BEh,4FFCh,59C8h
+ 0232 4B7F 0000 4FFC		B1                      WORD  4B7Fh,0000h,4FFCh
+ 0238 8E85 8685			C1                      WORD  8E85h,8685h
+ 023C 7EF8 77DB 8685		D1                      WORD  7EF8h,77DBh,8685h
+ 0242 711E 0000 77DB		E1                      WORD  711Eh,0000h,77DBh
+ 0248 6AC4 64C7			F1                      WORD  6AC4h,64C7h
+ 024C 5F23 59C8 64C7		G1                      WORD  5F23h,59C8h,64C7h
+
+ 0000				.code
+
+ 0000				Delay PROC
+				;*********************************************************************
+				; cx is number of milliseconds
+				; return after that number of milliseconds
+				;*********************************************************************
+ 0000  51				push cx		; save registers
+ 0001  53				push bx
+ 0002  52				push dx
+ 0003  9C				pushf
+
+ 0004  BB 000A				mov bx,10	; we need to div by 1000
+ 0007  BA 0000				mov dx,0	; clear dx
+ 000A  F7 F3				div bx		; to get ax into seconds
+
+ 000C  83 F8 00				cmp ax,0	; if 0
+ 000F  74 28				jz done		; don't do anything
+
+ 0011  50				push ax		; save ax
+ 0012  B4 2C				mov ah,2Ch	; set DOS function 2C (get system time)
+ 0014  CD 21				int 21h		; get current time (ch=hr,cl=min,dh=sec,dl=csec)
+ 0016  58				pop ax		; restore ax
+
+ 0017  8A FA				mov bh,dl	; storing current csec in bh
+
+ 0019  50			top:	push ax		; saving ax
+ 001A  B4 2C				mov ah,2Ch	; DOS function get system time
+ 001C  CD 21				int 21h		; get system time
+ 001E  58				pop ax		; restore ax
+ 001F  38 D7			pass:	cmp bh,dl	; see if csec is still the same
+ 0021  74 F6				jz top		; if same, get time again
+ 0023  8A DA				mov bl,dl	; otherwise, store new time
+ 0025  7C 03				jl less		; if bh is less, a new second has no occured
+ 0027  80 C2 64				add dl,100	; if bh is more, we need to add 100 (carry)
+ 002A  2A D7			less:	sub dl,bh	; get difference in dl
+ 002C  B6 00				mov dh,0	; clear dh
+ 002E  2B C2				sub ax,dx	; subtract that time from ax
+ 0030  8A FB				mov bh,bl	; store new time in bh
+ 0032  83 F8 00				cmp ax,0	; see if ax is now 0
+ 0035  7E 02				jle done	; if yeah, we are done
+ 0037  EB E0				jmp top		; if not DO IT AGAIN!!!
+
+ 0039  9D			done:	popf		; restore regs
+ 003A  5A				pop dx
+ 003B  5B				pop bx
+ 003C  59				pop cx
+ 003D  C3				ret		; RETURN!!!
+ 003E				Delay ENDP
+
+ 003E				getfilename PROC
+ 003E  9C			        pushf
+ 003F  50			        push ax
+ 0040  53			        push bx
+ 0041  52			        push dx
+ 0042  06			        push es
+ 0043  56			        push si
+ 0044  51			        push cx
+ 0045  55			        push bp
+
+ 0046  B8 6200			        mov ax, PSP			;grab the system stack
+ 0049  CD 21			        int DOS
+
+ 004B  B9 0000			        mov cx, 0
+
+ 004E  8E C3			        mov es, bx			;and get a pointer to it
+ 0050  BE 0080			        mov si, CMDTAIL			;the start of the arg at OFFSET 80
+
+ 0053  46			        inc si				;80-size of the argument
+ 0054  BB 0111 R		        mov bx, OFFSET filename
+
+ 0057				next:
+ 0057  46			        inc si
+ 0058  26: 8A 14		        mov dl, es:[si]
+ 005B  80 FA 21			        cmp dl, 21h			;check for exclamation
+ 005E  72 F7			        jb next
+ 0060  80 FA 7E			        cmp dl, 7Eh			;check for tilde
+ 0063  77 F2			        ja next
+
+ 0065				file:
+ 0065  80 FA 21			        cmp dl, 21h			;check for exclamation
+ 0068  72 0E			        jb done
+ 006A  80 FA 7E			        cmp dl, 7Eh
+ 006D  77 09			        ja done
+ 006F  88 17			        mov [bx], dl
+ 0071  43			        inc bx
+ 0072  46			        inc si
+ 0073  26: 8A 14		        mov dl, es:[si]
+ 0076  EB ED			        jmp file
+ 0078				done:
+ 0078  5D			        pop bp
+ 0079  59			        pop cx
+ 007A  5E			        pop si
+ 007B  07			        pop es
+ 007C  5A			        pop dx
+ 007D  5B			        pop bx
+ 007E  58			        pop ax
+ 007F  9D			        popf
+ 0080  C3			        ret
+ 0081				getfilename ENDP
+
+ 0081				readTempo PROC
+ 0081  60			        pusha
+
+ 0082  B8 3F00				mov ax,READFILE
+ 0085  8B 1E 00F0 R			mov bx,filehandle
+ 0089  B9 0004				mov cx,04h
+ 008C  BA 00FE R			mov dx, OFFSET tempo
+ 008F  CD 21				int 21h
+ 0091  A3 0109 R			mov bytesread,ax
+
+ 0094  61			        popa
+ 0095  C3			        ret
+ 0096				readTempo ENDP
+
+ 0096				readnewline PROC
+ 0096  60			        pusha
+
+ 0097  B8 3F00				mov ax, READFILE
+ 009A  8B 1E 00F0 R			mov bx, filehandle
+ 009E  B9 0002				mov cx, 02h
+ 00A1  BA 00FF R			mov dx, OFFSET garbagebuffer
+ 00A4  CD 21				int DOS
+ 00A6  A3 0109 R			mov bytesread, ax
+
+ 00A9  61			        popa
+ 00AA  C3				ret
+ 00AB				readnewline ENDP
+
+ 00AB				readANote PROC		;read bytes equal to cx value
+ 00AB  60			        pusha
+
+ 00AC  B8 0000			         mov ax, 0
+ 00AF  B4 3F			         mov ah,03Fh            ;command to read from file
+ 00B1  8B 1E 00F0 R		         mov bx,filehandle
+ 00B5  B9 0006			         mov cx,06h
+ 00B8  BA 00F4 R		         mov dx,OFFSET buffer   ;read bytes stored in buffe
+ 00BB  CD 21			         int 21h
+ 00BD  A3 0109 R		         mov bytesread, ax      ;store the no of bytes read
+
+ 00C0  61			         popa
+ 00C1  C3			         ret
+ 00C2				readANote ENDP
+
+ 00C2				openthisfile PROC	;open file by passing command to ah
+ 00C2  50			        push ax
+ 00C3  52			        push dx
+
+
+ 00C4  B8 3D00			        mov ax, OPENFILE		; call sys intrupt to open a file
+ 00C7  BA 0111 R		        mov dx, OFFSET filename 	; take the filename from the data
+
+ 00CA  CD 21			        int DOS
+ 00CC  72 05			        jc err
+
+ 00CE  A3 00F0 R		        mov filehandle, ax		; save the file handle
+ 00D1  EB 0B			        jmp done
+
+ 00D3				err:
+ 00D3  BA 0215 R		        mov dx, OFFSET error
+ 00D6  E8 0000 E		        call WriteString
+
+ 00D9  B8 4C00			        mov ax, DOSEXIT
+ 00DC  CD 21			        int DOS
+ 00DE				done:
+ 00DE  5A			        pop dx
+ 00DF  58			        pop ax
+ 00E0  C3			        ret
+ 00E1				openthisfile ENDP
+
+ 0252				.data
+ 0252 00			MUTED		BYTE 0
+ 00E1				.code
+ 00E1				SpeakerOn PROC
+ 00E1  9C				pushf
+ 00E2  50				push	ax
+
+ 00E3  80 3E 0252 R 01			cmp	MUTED, 1
+ 00E8  74 06				je	done
+
+ 00EA  E4 61				in	al, SPEAKER_PORT		; Read the speaker register
+ 00EC  0C 03				or	al, 03h				; Set the two low bits high
+ 00EE  E6 61				out	SPEAKER_PORT, al		; Write the speaker register
+
+ 00F0				done:
+ 00F0  58				pop	ax
+ 00F1  9D				popf
+ 00F2  C3				ret
+ 00F3				SpeakerOn ENDP
+
+ 00F3				SpeakerOff PROC
+
+ 00F3  9C				pushf
+ 00F4  50				push	ax
+
+ 00F5  E4 61				in	al, SPEAKER_PORT		; Read the speaker register
+ 00F7  24 FC				and	al, 0FCh			; Clear the two low bits high
+ 00F9  E6 61				out	SPEAKER_PORT, al		; Write the speaker register
+
+ 00FB  58				pop	ax
+ 00FC  9D				popf
+ 00FD  C3				ret
+ 00FE				SpeakerOff ENDP
+
+ 00FE				ConvertTempo PROC
+ 00FE  60				pusha
+
+ 00FF  E8 FF7F				call readTempo
+ 0102  BE 00FE R			mov si, OFFSET tempo
+ 0105  B1 00				mov cl,0
+ 0107  BB 0000				mov bx,0
+ 010A  B8 0000				mov ax,0
+ 010D  BA 0000				mov dx,0
+
+ 0110				Tem1:
+ 0110  8A 1C				mov bl,[si]
+ 0112  80 EB 30				sub bl,30h
+ 0115  D3 E3				shl bx,cl
+ 0117  03 C3				add ax,bx
+ 0119  BB 0000				mov bx,0
+ 011C  80 C1 04				add cl,4
+ 011F  46				inc si
+ 0120  42				inc dx
+ 0121  83 FA 04				cmp dx,4
+ 0124  72 EA				jb Tem1
+
+ 0126  A3 010F R			mov Full_Tempo,ax
+ 0129  E8 FF6A				call readnewline
+
+ 012C  61				popa
+ 012D  C3				ret
+ 012E				ConvertTempo ENDP
+
+ 012E				ReadNoteSpeed PROC
+ 012E  9C			        pushf
+
+ 012F  80 FC 46				cmp ah,'F'
+ 0132  75 0A				jne HalfNote
+ 0134  8B 16 010F R			mov dx,Full_Tempo
+ 0138  89 16 010B R			mov WAITTIME,dx
+ 013C  EB 52				jmp EndofNotes
+ 013E				HalfNote:
+ 013E  80 FC 48				cmp ah,'H'
+ 0141  75 10				jne QuarterNote
+ 0143  8B 16 010F R			mov dx,Full_Tempo
+ 0147  89 16 010B R			mov WaitTime,dx
+ 014B  B1 01				mov cl,1h
+ 014D  D3 2E 010B R			shr WaitTime,cl
+ 0151  EB 3D				jmp EndofNotes
+
+ 0153				QuarterNote:
+ 0153  80 FC 51				cmp ah,'Q'
+ 0156  75 10				jne EigthNote
+ 0158  8B 16 010F R			mov dx,Full_Tempo
+ 015C  89 16 010B R			mov WaitTime,dx
+ 0160  B1 02				mov cl,02h
+ 0162  D3 2E 010B R			shr WaitTime,cl
+ 0166  EB 28				jmp EndofNotes
+
+ 0168				EigthNote:
+ 0168  80 FC 45				cmp ah,'E'
+ 016B  75 10				jne SixteenNote
+ 016D  8B 16 010F R			mov dx,Full_Tempo
+ 0171  89 16 010B R			mov WaitTime,dx
+ 0175  B1 03				mov cl,03h
+ 0177  D3 2E 010B R			shr WaitTime,cl
+ 017B  EB 13				jmp EndofNotes
+
+ 017D				SixteenNote:
+ 017D  80 FC 53				cmp ah,'S'
+ 0180  75 0E				jne EndofNotes
+ 0182  8B 16 010F R			mov dx,Full_Tempo
+ 0186  89 16 010B R			mov WaitTime,dx
+ 018A  B1 04				mov cl,4
+ 018C  D3 2E 010B R			shr WaitTime,cl
+
+ 0190				EndofNotes:
+ 0190  9D			        popf
+ 0191  C3				ret
+ 0192				ReadNoteSpeed ENDP
+
+ 0192				Read_note PROC
+ 0192  9C			        pushf
+
+ 0193  B8 0000			        mov ax,0
+ 0196  8A 64 01			        mov ah,[si+1]
+ 0199				NoteA:
+ 0199  80 FC 41				cmp ah,'A'
+ 019C  75 07				jne NoteB
+ 019E  B8 022C R			mov ax ,OFFSET A1
+ 01A1  8B D8				mov bx,ax
+ 01A3  EB 46				jmp done
+ 01A5				NoteB:
+ 01A5  80 FC 42				cmp ah,'B'
+ 01A8  75 07				jne NoteC
+ 01AA  B8 0232 R			mov ax, OFFSET B1
+ 01AD  8B D8				mov bx,ax
+ 01AF  EB 3A				jmp done
+ 01B1				NoteC:
+ 01B1  80 FC 43				cmp ah,'C'
+ 01B4  75 07				jne NoteD
+ 01B6  B8 0238 R			mov ax,OFFSET C1
+ 01B9  8B D8				mov bx,ax
+ 01BB  EB 2E				jmp done
+ 01BD				NoteD:
+ 01BD  80 FC 44				cmp ah,'D'
+ 01C0  75 07				jne NoteE
+ 01C2  B8 023C R			mov ax,OFFSET D1
+ 01C5  8B D8				mov bx,ax
+ 01C7  EB 22				jmp done
+ 01C9				NoteE:
+ 01C9  80 FC 45				cmp ah,'E'
+ 01CC  75 07				jne NoteF
+ 01CE  B8 0242 R			mov ax,OFFSET E1
+ 01D1  8B D8				mov bx,ax
+ 01D3  EB 16				jmp done
+ 01D5				NoteF:
+ 01D5  80 FC 46				cmp ah,'F'
+ 01D8  75 07				jne NoteG
+ 01DA  B8 0248 R			mov ax,OFFSET F1
+ 01DD  8B D8				mov bx,ax
+ 01DF  EB 0A				jmp done
+ 01E1				NoteG:
+ 01E1  80 FC 47				cmp ah,'G'
+ 01E4  75 05				jne done
+ 01E6  B8 024C R			mov ax,OFFSET G1
+ 01E9  8B D8				mov bx,ax
+ 01EB				done:
+ 01EB  9D			        popf
+ 01EC  C3				ret
+ 01ED				Read_note ENDP
+
+ 01ED				read_octave PROC
+ 01ED  9C			        pushf
+
+ 01EE  B8 0000			        mov ax, 0
+ 01F1  8A 64 02			        mov ah, [si+2]
+ 01F4				OCTAVE1:
+ 01F4  80 FC 31				cmp ah,'1'
+ 01F7  75 04				jne OCTAVE2
+ 01F9  B1 00				mov cl,0
+ 01FB  EB 58				jmp done
+
+ 01FD				OCTAVE2:
+ 01FD  80 FC 32				cmp ah,'2'
+ 0200  75 04				jne OCTAVE3
+ 0202  B1 01				mov cl,1
+ 0204  EB 4F				jmp done
+
+ 0206				OCTAVE3:
+ 0206  80 FC 33				cmp ah,'3'
+ 0209  75 04				jne OCTAVE4
+ 020B  B1 02				mov cl,2
+ 020D  EB 46				jmp done
+
+ 020F				OCTAVE4:
+ 020F  80 FC 34				cmp ah,'4'
+ 0212  75 04				jne OCTAVE5
+ 0214  B1 03				mov cl,3
+ 0216  EB 3D				jmp done
+
+ 0218				OCTAVE5:
+ 0218  80 FC 35				cmp ah,'5'
+ 021B  75 04				jne OCTAVE6
+ 021D  B1 04				mov cl,4
+ 021F  EB 34				jmp done
+ 0221				OCTAVE6:
+ 0221  80 FC 36				cmp ah,'6'
+ 0224  75 04				jne OCTAVE7
+ 0226  B1 05				mov cl,5
+ 0228  EB 2B				jmp done
+ 022A				OCTAVE7:
+ 022A  80 FC 37				cmp ah,'7'
+ 022D  75 04				jne OCTAVE8
+ 022F  B1 06				mov cl,6
+ 0231  EB 22				jmp done
+ 0233				OCTAVE8:
+ 0233  80 FC 38				cmp ah,'8'
+ 0236  75 04				jne OCTAVE9
+ 0238  B1 07				mov cl,7
+ 023A  EB 19				jmp done
+ 023C				OCTAVE9:
+ 023C  80 FC 39				cmp ah,'9'
+ 023F  75 04				jne OCTAVE10
+ 0241  B1 08				mov cl,8
+ 0243  EB 10				jmp done
+ 0245				OCTAVE10:
+ 0245  80 FC 41				cmp ah,'A'
+ 0248  75 04				jne OCTAVE0
+ 024A  B1 09				mov cl,9
+ 024C  EB 07				jmp done
+ 024E				OCTAVE0:
+ 024E  80 FC 30				cmp ah,'0'
+ 0251  75 02				jne done
+ 0253  B1 01				mov cl,1
+
+ 0255				done:
+ 0255  9D			        popf
+ 0256  C3				ret
+ 0257				read_octave ENDP
+
+ 0257				findNoteNature PROC
+ 0257  9C			        pushf
+
+ 0258  B8 0000			        mov ax, 0
+ 025B				SharpNote:
+ 025B  8A 64 03			        mov ah,[si+3]
+ 025E  80 FC 52			        cmp ah,'R'
+ 0261  75 0A			        jne FlatNote
+ 0263  B8 0000			        mov ax,0
+ 0266  8B 47 02			        mov ax,[bx+2]
+ 0269  8B D8			        mov bx,ax
+ 026B  EB 19			        jmp done
+ 026D				FlatNote:
+ 026D  B8 0000			        mov ax,0
+ 0270  80 FC 62			        cmp ah,'b'
+ 0273  75 0A			        jne NormalNote
+ 0275  B8 0000			        mov ax,0
+ 0278  8B 47 04			        mov ax,[bx+4]
+ 027B  8B D8			        mov bx,ax
+ 027D  EB 07			        jmp done
+ 027F				NormalNote:
+ 027F  B8 0000			        mov ax, 0
+ 0282  8B 07			        mov ax,[bx]  ;Move counts into ax
+ 0284  8B D8			        mov bx,ax    ;bx has the number of counts
+ 0286				done:
+ 0286  9D			        popf
+ 0287  C3			        ret
+ 0288				findNoteNature ENDP
+
+ 0288				PlayFrequency PROC
+					;; Frequency is found in AH
+ 0288  9C			        pushf
+
+ 0289  8B D0			        mov     dx, ax
+
+ 028B  B0 B6			        mov	al, READY_TIMER			; Get the timer ready
+ 028D  E6 43				out	TIMER_CONTROL_PORT, al
+
+ 028F  8A C2				mov	al, dl
+ 0291  E6 42				out	TIMER_DATA_PORT, al		; Send the count low byte
+
+ 0293  8A C6				mov	al, dh
+ 0295  E6 42				out	TIMER_DATA_PORT, al		; Send the count high byte
+
+ 0297  9D			        popf
+ 0298  C3				ret
+ 0299				PlayFrequency ENDP
+
+ 0299				playSong PROC
+ 0299  9C			        pushf
+ 029A  60			        pusha
+
+ 029B  E8 FDA0			        call getfilename
+ 029E  E8 FE21			        call openthisfile
+
+ 02A1  E8 FE3D			        call SpeakerOn
+ 02A4  E8 FE57			        call ConvertTempo
+ 02A7				top:
+ 02A7  E8 FE01			        call readANote
+ 02AA  83 3E 0109 R 00		        cmp bytesread,0
+ 02AF  74 59			        je done
+
+ 02B1  83 3E 0109 R 4E			cmp bytesread, 78
+ 02B6  75 09				jne continue
+ 02B8  E8 FDDB				call readnewline
+ 02BB  C7 06 0109 R 0000		mov bytesread, 0
+ 02C1				continue:
+ 02C1  BE 00F4 R		        mov si, OFFSET buffer   ; grab a note to play
+ 02C4  B8 0000			        mov ax, 0
+ 02C7  8A 24			        mov ah, [si]
+
+ 02C9  80 FC 30			        cmp ah, '0'             ; check if we are at the end of file
+ 02CC  75 0A			        jne cont            ; if so exit
+ 02CE  8A 64 02			        mov ah,[si+2]
+ 02D1  80 FC 30			        cmp ah,'0'
+ 02D4  75 02			        jne cont
+ 02D6  EB 32			        jmp done
+
+ 02D8				cont:
+ 02D8  E8 FE53			        call ReadNoteSpeed
+
+ 02DB  E8 FEB4			        call Read_note
+ 02DE  E8 FF76			        call findNoteNature
+
+ 02E1  E8 FF09			        call read_octave
+ 02E4  80 FC 30			        cmp ah,'0'
+ 02E7  75 06			        jne RightShift
+
+ 02E9				LeftShift:
+ 02E9  D3 E3			        shl bx,cl
+ 02EB  8B C3			        mov ax,bx
+ 02ED  EB 04			        jmp SpeakerOut
+
+ 02EF				RightShift:
+ 02EF  D3 EB			        shr bx,cl
+ 02F1  8B C3			        mov ax,bx
+
+ 02F3				SpeakerOut:
+ 02F3  E8 FF92			        call PlayFrequency
+
+ 02F6  A1 010B R		        mov ax, WaitTime
+ 02F9  E8 FD04			        call Delay
+
+ 02FC  B8 0020			        mov ax,20h
+
+ 02FF  E8 FDF1			        call SpeakerOff
+ 0302  E8 FCFB			        call Delay
+ 0305  E8 FDD9			        call SpeakerOn
+
+ 0308  EB 9D			        jmp top
+
+ 030A				done:
+ 030A  E8 FDE6			        call SpeakerOff
+
+ 030D  61			        popa
+ 030E  9D			        popf
+ 030F  C3			        ret
+ 0310				playSong ENDP
+
+ 0310				main PROC
+ 0310  B8 ---- R			mov ax,@data
+ 0313  8E D8				mov ds,ax
+
+ 0315  E8 FF81			        call playsong
+
+ 0318  B8 4C00				mov ax,4C00h
+ 031B  CD 21				int 21h
+ 031D				main ENDP
+				END main
+Microsoft (R) Macro Assembler Version 6.11		    11/11/18 17:08:03
+DOSTUNES						     Symbols 2 - 1
+
+
+
+
+Segments and Groups:
+
+                N a m e                 Size     Length   Align   Combine Class
+
+DGROUP . . . . . . . . . . . . .	GROUP
+_DATA  . . . . . . . . . . . . .	16 Bit	 0253	  Word	  Public  'DATA'	
+STACK  . . . . . . . . . . . . .	16 Bit	 0200	  Para	  Stack	  'STACK'	 
+_TEXT  . . . . . . . . . . . . .	16 Bit	 031D	  Word	  Public  'CODE'	
+
+
+Procedures,  parameters and locals:
+
+                N a m e                 Type     Value    Attr
+
+ConvertTempo . . . . . . . . . .	P Near	 00FE	  _TEXT	Length= 0030 Public STDCALL
+  Tem1 . . . . . . . . . . . . .	L Near	 0110	  _TEXT	
+Delay  . . . . . . . . . . . . .	P Near	 0000	  _TEXT	Length= 003E Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 0019	  _TEXT	
+  pass . . . . . . . . . . . . .	L Near	 001F	  _TEXT	
+  less . . . . . . . . . . . . .	L Near	 002A	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0039	  _TEXT	
+DumpLongRegs . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+DumpMem  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+DumpRegs . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+NewLine  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+PlayFrequency  . . . . . . . . .	P Near	 0288	  _TEXT	Length= 0011 Public STDCALL
+PrintVersion . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadChar . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexByte  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexDigit . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexWord  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadInt  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadLine . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadNoteSpeed  . . . . . . . . .	P Near	 012E	  _TEXT	Length= 009D Public STDCALL
+  HalfNote . . . . . . . . . . .	L Near	 013E	  _TEXT	
+  QuarterNote  . . . . . . . . .	L Near	 0153	  _TEXT	
+  EigthNote  . . . . . . . . . .	L Near	 0168	  _TEXT	
+  SixteenNote  . . . . . . . . .	L Near	 017D	  _TEXT	
+  EndofNotes . . . . . . . . . .	L Near	 0190	  _TEXT	
+Read_note  . . . . . . . . . . .	P Near	 0192	  _TEXT	Length= 005B Public STDCALL
+  NoteA  . . . . . . . . . . . .	L Near	 0199	  _TEXT	
+  NoteB  . . . . . . . . . . . .	L Near	 01A5	  _TEXT	
+  NoteC  . . . . . . . . . . . .	L Near	 01B1	  _TEXT	
+  NoteD  . . . . . . . . . . . .	L Near	 01BD	  _TEXT	
+  NoteE  . . . . . . . . . . . .	L Near	 01C9	  _TEXT	
+  NoteF  . . . . . . . . . . . .	L Near	 01D5	  _TEXT	
+  NoteG  . . . . . . . . . . . .	L Near	 01E1	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 01EB	  _TEXT	
+SkipToEOL  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+SpeakerOff . . . . . . . . . . .	P Near	 00F3	  _TEXT	Length= 000B Public STDCALL
+SpeakerOn  . . . . . . . . . . .	P Near	 00E1	  _TEXT	Length= 0012 Public STDCALL
+  done . . . . . . . . . . . . .	L Near	 00F0	  _TEXT	
+TraceRegisterChanges . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+Version  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteBit . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteChar  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexByte . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexDigit  . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexLong . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexWord . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteInt . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteString  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteUInt  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+findNoteNature . . . . . . . . .	P Near	 0257	  _TEXT	Length= 0031 Public STDCALL
+  SharpNote  . . . . . . . . . .	L Near	 025B	  _TEXT	
+  FlatNote . . . . . . . . . . .	L Near	 026D	  _TEXT	
+  NormalNote . . . . . . . . . .	L Near	 027F	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0286	  _TEXT	
+getfilename  . . . . . . . . . .	P Near	 003E	  _TEXT	Length= 0043 Public STDCALL
+  next . . . . . . . . . . . . .	L Near	 0057	  _TEXT	
+  file . . . . . . . . . . . . .	L Near	 0065	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0078	  _TEXT	
+main . . . . . . . . . . . . . .	P Near	 0310	  _TEXT	Length= 000D Public STDCALL
+openthisfile . . . . . . . . . .	P Near	 00C2	  _TEXT	Length= 001F Public STDCALL
+  err  . . . . . . . . . . . . .	L Near	 00D3	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 00DE	  _TEXT	
+playSong . . . . . . . . . . . .	P Near	 0299	  _TEXT	Length= 0077 Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 02A7	  _TEXT	
+  continue . . . . . . . . . . .	L Near	 02C1	  _TEXT	
+  cont . . . . . . . . . . . . .	L Near	 02D8	  _TEXT	
+  LeftShift  . . . . . . . . . .	L Near	 02E9	  _TEXT	
+  RightShift . . . . . . . . . .	L Near	 02EF	  _TEXT	
+  SpeakerOut . . . . . . . . . .	L Near	 02F3	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 030A	  _TEXT	
+readANote  . . . . . . . . . . .	P Near	 00AB	  _TEXT	Length= 0017 Public STDCALL
+readTempo  . . . . . . . . . . .	P Near	 0081	  _TEXT	Length= 0015 Public STDCALL
+read_octave  . . . . . . . . . .	P Near	 01ED	  _TEXT	Length= 006A Public STDCALL
+  OCTAVE1  . . . . . . . . . . .	L Near	 01F4	  _TEXT	
+  OCTAVE2  . . . . . . . . . . .	L Near	 01FD	  _TEXT	
+  OCTAVE3  . . . . . . . . . . .	L Near	 0206	  _TEXT	
+  OCTAVE4  . . . . . . . . . . .	L Near	 020F	  _TEXT	
+  OCTAVE5  . . . . . . . . . . .	L Near	 0218	  _TEXT	
+  OCTAVE6  . . . . . . . . . . .	L Near	 0221	  _TEXT	
+  OCTAVE7  . . . . . . . . . . .	L Near	 022A	  _TEXT	
+  OCTAVE8  . . . . . . . . . . .	L Near	 0233	  _TEXT	
+  OCTAVE9  . . . . . . . . . . .	L Near	 023C	  _TEXT	
+  OCTAVE10 . . . . . . . . . . .	L Near	 0245	  _TEXT	
+  OCTAVE0  . . . . . . . . . . .	L Near	 024E	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0255	  _TEXT	
+readnewline  . . . . . . . . . .	P Near	 0096	  _TEXT	Length= 0015 Public STDCALL
+
+
+Symbols:
+
+                N a m e                 Type     Value    Attr
+
+@CodeSize  . . . . . . . . . . .	Number	 0000h	 
+@DataSize  . . . . . . . . . . .	Number	 0000h	 
+@Interface . . . . . . . . . . .	Number	 0003h	 
+@Model . . . . . . . . . . . . .	Number	 0002h	 
+@code  . . . . . . . . . . . . .	Text   	 _TEXT
+@data  . . . . . . . . . . . . .	Text   	 DGROUP
+@fardata?  . . . . . . . . . . .	Text   	 FAR_BSS
+@fardata . . . . . . . . . . . .	Text   	 FAR_DATA
+@stack . . . . . . . . . . . . .	Text   	 DGROUP
+A1 . . . . . . . . . . . . . . .	Word	 022C	  _DATA	
+B1 . . . . . . . . . . . . . . .	Word	 0232	  _DATA	
+BIOS . . . . . . . . . . . . . .	Number	 0010h	 
+C1 . . . . . . . . . . . . . . .	Word	 0238	  _DATA	
+CLOSEFILE  . . . . . . . . . . .	Number	 3E00h	 
+CMDTAIL  . . . . . . . . . . . .	Number	 0080h	 
+D1 . . . . . . . . . . . . . . .	Word	 023C	  _DATA	
+DOSEXIT  . . . . . . . . . . . .	Number	 4C00h	 
+DOS  . . . . . . . . . . . . . .	Number	 0021h	 
+E1 . . . . . . . . . . . . . . .	Word	 0242	  _DATA	
+F1 . . . . . . . . . . . . . . .	Word	 0248	  _DATA	
+FREQUENCY  . . . . . . . . . . .	Number	 001234DCh   
+Full_Tempo . . . . . . . . . . .	Word	 010F	  _DATA	
+G1 . . . . . . . . . . . . . . .	Word	 024C	  _DATA	
+LINECOUNT  . . . . . . . . . . .	Word	 010D	  _DATA	
+MUTED  . . . . . . . . . . . . .	Byte	 0252	  _DATA	
+OPENFILE . . . . . . . . . . . .	Number	 3D00h	 
+PSP  . . . . . . . . . . . . . .	Number	 6200h	 
+READFILE . . . . . . . . . . . .	Number	 3F00h	 
+READY_TIMER  . . . . . . . . . .	Number	 00B6h	 
+SPEAKER_PORT . . . . . . . . . .	Number	 0061h	 
+TIMER_CONTROL_PORT . . . . . . .	Number	 0043h	 
+TIMER_DATA_PORT  . . . . . . . .	Number	 0042h	 
+WAITTIME . . . . . . . . . . . .	Word	 010B	  _DATA	
+buffer . . . . . . . . . . . . .	Byte	 00F4	  _DATA	
+buffsize . . . . . . . . . . . .	Word	 00F2	  _DATA	
+bytesread  . . . . . . . . . . .	Word	 0109	  _DATA	
+cmdbuffer  . . . . . . . . . . .	Word	 0000	  _DATA	
+error  . . . . . . . . . . . . .	Byte	 0215	  _DATA	
+filehandle . . . . . . . . . . .	Word	 00F0	  _DATA	
+filename . . . . . . . . . . . .	Byte	 0111	  _DATA	
+garbageBuffer  . . . . . . . . .	Byte	 00FF	  _DATA	
+tempo  . . . . . . . . . . . . .	Byte	 00FE	  _DATA	
+
+	   0 Warnings
+	   0 Errors

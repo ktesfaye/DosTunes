@@ -1,0 +1,1477 @@
+Microsoft (R) Macro Assembler Version 6.11		    11/10/18 23:02:24
+tunes.asm						     Page 1 - 1
+
+
+				INCLUDE cs240.inc
+			      C .NOLIST
+			      C .LIST
+			      C 
+				.386
+
+ = 4C00				DOSEXIT			= 4C00h
+ = 0021				DOS			= 21h
+ = 0010				BIOS			= 10h
+
+ = 001234DC			FREQUENCY		= 1193180
+ = 00B6				READY_TIMER		= 0B6h
+ = 0042				TIMER_DATA_PORT		= 42h
+ = 0043				TIMER_CONTROL_PORT	= 43h
+ = 0061				SPEAKER_PORT		= 61h
+
+ = 3D00				OPENFILE 		= 3D00h
+ = 3F00				READFILE 		= 3F00h
+ = 3E00				CLOSEFILE 		= 3E00h
+ = 6200				PSP 			= 6200h
+ = 0080				CMDTAIL 		= 80h
+
+ = 0003				BIOS_READCURSOR	        = 03h
+ = 0002				BIOS_WRITECURSOR	= 02h
+
+ 0000				.data
+ 0000 0000			space 			WORD 0
+ 0002 00			xpos 			BYTE 0
+ 0003 00			ypos 			BYTE 0
+ 0004 0000			oldpos 			WORD 0
+ 0006 00			num 			BYTE 0
+
+ 0007 0000			filehandle 		WORD ?
+ 0009  0104 [			filename 		BYTE 260 dup(0)
+        00
+       ]
+ 010D 54 68 69 73 20 66		error   		BYTE "This file does not exist", 0
+       69 6C 65 20 64 6F
+       65 73 20 6E 6F 74
+       20 65 78 69 73 74
+       00
+ 0126 54 68 69 73 20 66		ferror 			BYTE "This file didn't close properly", 0
+       69 6C 65 20 64 69
+       64 6E 27 74 20 63
+       6C 6F 73 65 20 70
+       72 6F 70 65 72 6C
+       79 00
+
+ 0146 11DC			Cn			WORD	4572
+ 0148 10D4			Csh			WORD	4308
+ 014A 0FDA			Dn			WORD	4058
+ 014C 0EFC			Dsh			WORD	3836
+ 014E 10D4			Dp			WORD	4308
+ 0150 0E24			En			WORD	3620
+ 0152 0EFC			Eb			WORD	3836
+ 0154 0D62			Fn			WORD	3426
+ 0156 0C99			Fsh			WORD	3225
+ 0158 0BE3			Gn			WORD	3043
+ 015A 0B39			Gsh			WORD	2873
+ 015C 0C99			Gb			WORD	3225
+ 015E 0A97			An			WORD	2711
+ 0160 09FC			Ash			WORD	2556
+ 0162 0B39			Ab			WORD	2873
+ 0164 0970			Bn			WORD	2416
+ 0166 09FC			Bb			WORD	2556
+ 0000				.code
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Get a file from command line and read bytes in
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 0000				openfil PROC
+ 0000  50				push ax
+ 0001  52				push dx
+ 0002  E8 0038				call cmdin
+
+ 0005  B8 3D00				mov ax, OPENFILE		; call sys intrupt to open a file
+ 0008  BA 0009 R			mov dx, OFFSET filename 	; take the filename from the data
+
+ 000B  CD 21				int DOS
+ 000D  72 05				jc err
+
+ 000F  A3 0007 R			mov filehandle, ax		; save the file handle
+ 0012  EB 0B				jmp done
+
+ 0014				err:
+ 0014  BA 010D R			mov dx, OFFSET error
+ 0017  E8 0000 E			call WriteString
+
+ 001A  B8 4C00				mov ax, DOSEXIT
+ 001D  CD 21				int DOS
+ 001F				done:
+ 001F  5A				pop dx
+ 0020  58				pop ax
+ 0021  C3				ret
+ 0022				openfil ENDP
+
+ 0022				closefil PROC
+ 0022  50				push ax
+ 0023  52				push dx
+
+ 0024  B8 3E00				mov ax, CLOSEFILE		; call sys intrupt to close a file
+ 0027  8B 1E 0007 R			mov bx, filehandle 		; take the filename from the data
+
+ 002B  CD 21				int DOS
+ 002D  72 05				jc err
+
+ 002F  A3 0007 R			mov filehandle, ax		; save the file handle
+ 0032  EB 06				jmp done
+ 0034				err:
+ 0034  BA 0126 R			mov dx, OFFSET ferror
+ 0037  E8 0000 E			call WriteString
+ 003A				done:
+ 003A  5A				pop dx
+ 003B  58				pop ax
+ 003C  C3				ret
+ 003D				closefil ENDP
+
+ 003D				cmdin PROC
+ 003D  9C				pushf
+ 003E  50				push ax
+ 003F  53				push bx
+ 0040  52				push dx
+ 0041  06				push es
+ 0042  56				push si
+ 0043  51				push cx
+ 0044  55				push bp
+
+ 0045  B8 6200				mov ax, PSP			;grab the system stack
+ 0048  CD 21				int DOS
+
+ 004A  B9 0000				mov cx, 0
+
+ 004D  8E C3				mov es, bx			;and get a pointer to it
+ 004F  BE 0080				mov si, CMDTAIL			;the start of the arg at OFFSET 80
+
+ 0052  46				inc si				;80-size of the argument
+ 0053  BB 0009 R			mov bx, OFFSET filename
+
+ 0056				next:
+ 0056  46				inc si
+ 0057  26: 8A 14			mov dl, es:[si]
+ 005A  80 FA 21				cmp dl, 21h			;check for exclamation
+ 005D  72 F7				jb next
+ 005F  80 FA 7E				cmp dl, 7Eh			;check for tilde
+ 0062  77 F2				ja next
+
+ 0064				file:
+ 0064  80 FA 21				cmp dl, 21h			;check for exclamation
+ 0067  72 0E				jb done
+ 0069  80 FA 7E				cmp dl, 7Eh
+ 006C  77 09				ja done
+ 006E  88 17				mov [bx], dl
+ 0070  43				inc bx
+ 0071  46				inc si
+ 0072  26: 8A 14			mov dl, es:[si]
+ 0075  EB ED				jmp file
+ 0077				done:
+ 0077  5D				pop bp
+ 0078  59				pop cx
+ 0079  5E				pop si
+ 007A  07				pop es
+ 007B  5A				pop dx
+ 007C  5B				pop bx
+ 007D  58				pop ax
+ 007E  9D				popf
+ 007F  C3				ret
+ 0080				cmdin ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Turn on/off the speaker
+				;///////////////////////////////////////////////////////////////////////////////
+ 0168				.data
+ 0168 00			MUTED		BYTE 0
+ 0080				.code
+ 0080				SpeakerOn PROC
+ 0080  9C				pushf
+ 0081  50				push	ax
+
+ 0082  80 3E 0168 R 01			cmp	MUTED, 1
+ 0087  74 06				je	done
+
+ 0089  E4 61				in	al, SPEAKER_PORT		; Read the speaker register
+ 008B  0C 03				or	al, 03h				; Set the two low bits high
+ 008D  E6 61				out	SPEAKER_PORT, al		; Write the speaker register
+
+ 008F				done:
+ 008F  58				pop	ax
+ 0090  9D				popf
+ 0091  C3				ret
+ 0092				SpeakerOn ENDP
+
+ 0092				SpeakerOff PROC
+
+ 0092  9C				pushf
+ 0093  50				push	ax
+
+ 0094  E4 61				in	al, SPEAKER_PORT		; Read the speaker register
+ 0096  24 FC				and	al, 0FCh			; Clear the two low bits high
+ 0098  E6 61				out	SPEAKER_PORT, al		; Write the speaker register
+
+ 009A  58				pop	ax
+ 009B  9D				popf
+ 009C  C3				ret
+ 009D				SpeakerOff ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Frequency stuff
+				;///////////////////////////////////////////////////////////////////////////////
+ 0169				.data
+ 0169 0000			BPM	  WORD 0
+ 016B  000A [			tempo	  BYTE 10 DUP(0) 			; Buffer used when reading file
+        00
+       ]
+ 0175 0000			bytesread WORD 0 			; Helps to get BPM from top of file
+
+ 009D				.code
+ 009D				getTempo PROC
+ 009D  9C				pushf
+ 009E  50				push 	ax
+ 009F  53				push	bx
+ 00A0  51				push	cx
+ 00A1  52				push	dx
+
+ 00A2  B8 0000				mov	ax, 0
+ 00A5  B4 3F				mov 	ah,03Fh
+ 00A7  8B 1E 0007 R			mov 	bx,filehandle
+ 00AB  B9 0004				mov 	cx,04h
+ 00AE  BA 016B R			mov 	dx,OFFSET tempo
+ 00B1  CD 21				int 	DOS
+ 00B3  A3 0175 R			mov 	bytesread, ax
+
+ 00B6				done:
+ 00B6  5A				pop	dx
+ 00B7  59				pop	cx
+ 00B8  5B				pop	bx
+ 00B9  58				pop 	ax
+ 00BA  9D				popf
+ 00BB  C3				ret
+ 00BC				getTempo ENDP
+
+ 0177				.data
+ 0177 08			fastestNote	BYTE 	8
+ 0178 0000			full_tempo	WORD	0
+ 00BC				.code
+ 00BC				convertTempo 	PROC
+ 00BC  9C				pushf
+ 00BD  50				push	ax
+ 00BE  52				push	dx
+
+ 00BF  E8 FFDB				call	getTempo
+ 00C2  B8 8700				mov 	ax, 60000000
+ 00C5  BA 016B R			mov 	dx, OFFSET tempo
+ 00C8  F7 F2				div 	dx
+
+ 00CA  BA 0177 R			mov 	dx, OFFSET fastestNote
+ 00CD  F7 F2				div	dx
+
+ 00CF  BA 0178 R			mov	dx, OFFSET full_tempo
+ 00D2  8B D0				mov	dx, ax
+
+ 00D4  5A				pop	dx
+ 00D5  58				pop	ax
+ 00D6  9D				popf
+ 00D7  C3				ret
+ 00D8				convertTempo ENDP
+
+ 017A				.data
+ 017A  0005 [			noteRead	BYTE 5 dup(0)
+        00
+       ]
+ 00D8				.code
+ 00D8				readNote PROC
+ 00D8				readonebyte PROC
+ 00D8  50				push 	ax
+ 00D9  53				push 	bx
+ 00DA  51				push 	cx
+ 00DB  52				push 	dx
+
+ 00DC  B8 3F00				mov 	ax, READFILE
+ 00DF  8B 1E 0007 R			mov 	bx,filehandle
+ 00E3  B9 0006				mov 	cx,06h
+ 00E6  BA 017A R			mov 	dx,OFFSET noteRead
+ 00E9  CD 21				int 	DOS
+ 00EB  A3 0175 R			mov 	bytesread,ax
+ 00EE  C3				ret
+ 00EF				readonebyte ENDP
+ 00EF				readNote ENDP
+
+ 017F				.data
+ 017F 00			noteSpeed	BYTE	0
+ 00EF				.code
+ 00EF				findNoteSpeed PROC
+ 00EF  9C				pushf
+ 00F0  50				push	ax
+ 00F1  53				push	bx
+ 00F2  57				push	di
+ 00F3  56				push	si
+ 00F4  52				push	dx
+
+ 00F5  BB 017A R			mov	bx, OFFSET noteRead
+ 00F8  B8 016B R			mov	ax, OFFSET tempo
+ 00FB  BF 017F R			mov	di, OFFSET noteSpeed
+ 00FE  BE 0000				mov	si, 0
+ 0101				eigthNote:
+ 0101  B1 08				mov	cl, 8
+ 0103  38 E1				cmp	cl, ah		;Check for 8th note
+ 0105  75 06				jne	quarterNote
+ 0107  F6 E1				mul	cl
+ 0109  8B F8				mov	di, ax
+ 010B  EB 20				jmp	done
+ 010D				quarterNote:
+ 010D  B1 04				mov	cl, 4
+ 010F  38 E1				cmp	cl, ah		;check for qurter note
+ 0111  75 06				jne	halfNote
+ 0113  F6 E1				mul	cl
+ 0115  8B F8				mov	di, ax
+ 0117  EB 14				jmp	done
+ 0119				halfNote:
+ 0119  B1 02				mov	cl, 2
+ 011B  38 E1				cmp	cl, ah		;check for half note
+ 011D  75 06				jne 	wholeNote
+ 011F  F6 E1				mul	cl
+ 0121  8B F8				mov	di, ax
+ 0123  EB 08				jmp	done
+ 0125				wholeNote:
+ 0125  B1 01				mov	cl, 1
+ 0127  38 E1				cmp	cl, ah		;check for hole note
+ 0129  F6 E1				mul	cl
+ 012B  8B F8				mov	di, ax
+ 012D				done:
+ 012D  5A				pop	dx
+ 012E  5E				pop	si
+ 012F  5F				pop	di
+ 0130  5B				pop	bx
+ 0131  58				pop	ax
+ 0132  9D				popf
+ 0133  C3				ret
+ 0134				findNoteSpeed ENDP
+
+ 0180				.data
+ 0180  0003 [			temp		BYTE	3 dup(0)
+        00
+       ]
+ 0183 00			foundFrequency	BYTE	0
+ 0134				.code
+ 0134				findNoteFreq PROC
+ 0134  9C				pushf
+ 0135  50				push ax
+ 0136  51				push cx
+ 0137  52				push dx
+
+					; mov	bx, OFFSET noteRead
+				;///////////////////////////////////////////////////////////////////////////////
+ 0138				NoteA:
+ 0138  80 FC 41				cmp ah,'A'
+ 013B  75 07				jne NoteB
+ 013D  B8 015E R			mov ax ,OFFSET An
+ 0140  8B D8				mov bx,ax
+ 0142  EB 46				jmp done
+				;///////////////////////////////////////////////////////////////////////////////
+ 0144				NoteB:
+ 0144  80 FC 42				cmp ah,'B'
+ 0147  75 07				jne NoteC
+ 0149  B8 0164 R			mov ax, OFFSET Bn
+ 014C  8B D8				mov bx,ax
+ 014E  EB 3A				jmp done
+				;///////////////////////////////////////////////////////////////////////////////
+ 0150				NoteC:
+ 0150  80 FC 43				cmp ah,'C'
+ 0153  75 07				jne NoteD
+ 0155  B8 0146 R			mov ax,OFFSET Cn
+ 0158  8B D8				mov bx,ax
+ 015A  EB 2E				jmp done
+				;///////////////////////////////////////////////////////////////////////////////
+ 015C				NoteD:
+ 015C  80 FC 44				cmp ah,'D'
+ 015F  75 07				jne NoteE
+ 0161  B8 014A R			mov ax,OFFSET Dn
+ 0164  8B D8				mov bx,ax
+ 0166  EB 22				jmp done
+				;///////////////////////////////////////////////////////////////////////////////
+ 0168				NoteE:
+ 0168  80 FC 45				cmp ah,'E'
+ 016B  75 07				jne NoteF
+ 016D  B8 0150 R			mov ax,OFFSET En
+ 0170  8B D8				mov bx,ax
+ 0172  EB 16				jmp done
+				;///////////////////////////////////////////////////////////////////////////////
+ 0174				NoteF:
+ 0174  80 FC 46				cmp ah,'F'
+ 0177  75 07				jne NoteG
+ 0179  B8 0154 R			mov ax,OFFSET Fn
+ 017C  8B D8				mov bx,ax
+ 017E  EB 0A				jmp done
+				;///////////////////////////////////////////////////////////////////////////////
+ 0180				NoteG:
+ 0180  80 FC 47				cmp ah,'G'
+ 0183  75 05				jne done
+ 0185  B8 0158 R			mov ax,OFFSET Gn
+ 0188  8B D8				mov bx,ax
+				;///////////////////////////////////////////////////////////////////////////////
+ 018A				done:
+ 018A  5A				pop dx
+ 018B  59				pop cx
+ 018C  58				pop ax
+ 018D  9D				popf
+ 018E  C3				ret
+ 018F				findNoteFreq ENDP
+
+ 018F				PlayFrequency PROC
+					;; Frequency is found in DX
+
+ 018F  9C				pushf
+ 0190  50				push	ax
+
+ 0191  B0 B6				mov	al, READY_TIMER			; Get the timer ready
+ 0193  E6 43				out	TIMER_CONTROL_PORT, al
+
+ 0195  8A C2				mov	al, dl
+ 0197  E6 42				out	TIMER_DATA_PORT, al		; Send the count low byte
+
+ 0199  8A C6				mov	al, dh
+ 019B  E6 42				out	TIMER_DATA_PORT, al		; Send the count high byte
+
+ 019D  58				pop	ax
+ 019E  9D				popf
+ 019F  C3				ret
+ 01A0				PlayFrequency ENDP
+
+ 01A0				playSong PROC
+ 01A0  9C				pushf
+ 01A1  50				push	ax
+ 01A2  52				push	dx
+
+ 01A3  E8 FE97				call	cmdin
+ 01A6  E8 FE57				call	OpenFil
+
+ 01A9  E8 FED4				call	SpeakerOn
+ 01AC				top:
+ 01AC  E8 FF0D				call	convertTempo
+
+ 01AF  E8 FF26				call	readNote
+ 01B2  83 3E 0175 R 00			cmp	bytesRead, 0
+ 01B7  74 1C				je	done
+
+ 01B9  83 F8 00				cmp	ax, 0
+ 01BC  74 17				je	done
+
+ 01BE  E8 FF73				call	findNoteFreq
+ 01C1  E8 FF2B				call	findNoteSpeed
+ 01C4  E8 FEF5				call	convertTempo
+
+ 01C7  B8 017F R			mov	ax, OFFSET noteSpeed
+ 01CA  E8 0076				call	Delay
+ 01CD  BA 0183 R			mov	dx, OFFSET foundFrequency
+ 01D0  E8 FFBC				call	PlayFrequency
+ 01D3  EB D7				jmp	top
+
+ 01D5				done:
+ 01D5  E8 FE4A				call	closeFil
+ 01D8  E8 FEB7				call	SpeakerOff
+
+ 01DB  5A				pop	dx
+ 01DC  58				pop	ax
+ 01DD  C3				ret
+ 01DE				playSong ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Cursor munpliation
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 01DE				getCursor PROC
+ 01DE  50				push ax
+ 01DF  53				push bx
+ 01E0  51				push cx
+
+ 01E1  B4 03				mov ah,3
+ 01E3  B7 00				mov bh,0
+ 01E5  CD 10				int 10h
+
+ 01E7  59				pop cx
+ 01E8  5B				pop bx
+ 01E9  58				pop ax
+ 01EA  C3				ret
+ 01EB				getCursor ENDP
+
+ 01EB				SetCursor PROC
+				;Set the cursor to the top right poistion
+ 01EB  9C			        pushf
+ 01EC  50			        push 	ax
+ 01ED  53			        push 	bx
+ 01EE  51			        push 	cx
+
+ 01EF  B7 00				mov 	bh, 0
+ 01F1  B4 02			        mov 	ah, BIOS_WRITECURSOR
+ 01F3  CD 10			        int 	BIOS
+
+ 01F5  59			        pop 	cx
+ 01F6  5B			        pop 	bx
+ 01F7  58			        pop 	ax
+ 01F8  9D			        popf
+ 01F9  C3			        ret
+ 01FA				SetCursor ENDP
+
+ 01FA				RestoreCursor PROC
+				;restore the old cursor position
+ 01FA  9C			        pushf
+ 01FB  50			        push 	ax
+ 01FC  53			        push 	bx
+ 01FD  51			        push 	cx
+ 01FE  52			        push 	dx
+
+ 01FF  8A 36 0184 R		        mov 	dh, OLDCURSOR_ROW
+ 0203  8A 16 0189 R		        mov 	dl, OLDCURSOR_COLUMN
+
+ 0207  B7 00				mov 	bh, 0
+ 0209  B4 02			        mov 	ah, BIOS_WRITECURSOR
+ 020B  CD 10			        int 	BIOS
+
+ 020D  5A			        pop 	dx
+ 020E  59			        pop 	cx
+ 020F  5B			        pop 	bx
+ 0210  58			        pop 	ax
+ 0211  9D			        popf
+ 0212  C3			        ret
+ 0213				RestoreCursor ENDP
+
+ 0213				AdvanceCursor PROC
+				; Advances the cursor one space forward.
+ 0213  50				push	ax
+ 0214  53				push	bx
+ 0215  51				push	cx
+ 0216  52				push	dx
+ 0217  9C				pushf
+
+ 0218  B7 00				mov	bh, 0			; BH = video page
+ 021A  B4 03				mov	ah, BIOS_READCURSOR	; AH = interrupt
+ 021C  CD 10				int	BIOS			; DH = row, DL = column
+
+ 021E  FE C2				inc	DL			; DL = new column
+ 0220  B4 02				mov	ah, BIOS_WRITECURSOR	; AH = interrupt
+ 0222  CD 10				int	BIOS
+
+ 0224  9D				popf
+ 0225  5A				pop	dx
+ 0226  59				pop	cx
+ 0227  5B				pop	bx
+ 0228  58				pop	ax
+ 0229  C3				ret
+ 022A				AdvanceCursor ENDP
+
+ 0184				.data
+ 0184  0004 [			OLDCURSOR_ROW    BYTE 4 dup(0), 0
+        00
+       ] 00
+ 0189  0004 [			OLDCURSOR_COLUMN BYTE 4 dup(0), 0
+        00
+       ] 00
+ 022A				.code
+ 022A				SaveCursor PROC
+				;save the old cursor position
+ 022A  9C			        pushf
+ 022B  50			        push 	ax
+ 022C  53			        push 	bx
+ 022D  51			        push 	cx
+ 022E  52			        push 	dx
+
+ 022F  B7 00			        mov 	bh, 0
+ 0231  B4 03			        mov 	ah, BIOS_READCURSOR
+ 0233  CD 10			        int 	BIOS
+
+ 0235  88 36 0184 R		        mov 	OLDCURSOR_ROW, dh
+ 0239  88 16 0189 R		        mov 	OLDCURSOR_COLUMN, dl
+
+ 023D  5A			        pop 	dx
+ 023E  59			        pop 	cx
+ 023F  5B			        pop 	bx
+ 0240  58			        pop 	ax
+ 0241  9D			        popf
+ 0242  C3			        ret
+ 0243				SaveCursor ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Delay
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 0243				Delay PROC
+				;*********************************************************************
+				; cx is number of milliseconds
+				; return after that number of milliseconds
+				;*********************************************************************
+ 0243  51				push cx		; save registers
+ 0244  53				push bx
+ 0245  52				push dx
+ 0246  9C				pushf
+
+ 0247  BB 000A				mov bx,10	; we need to div by 1000
+ 024A  BA 0000				mov dx,0	; clear dx
+ 024D  F7 F3				div bx		; to get ax into seconds
+
+ 024F  83 F8 00				cmp ax,0	; if 0
+ 0252  74 28				jz done		; don't do anything
+
+ 0254  50				push ax		; save ax
+ 0255  B4 2C				mov ah,2Ch	; set DOS function 2C (get system time)
+ 0257  CD 21				int 21h		; get current time (ch=hr,cl=min,dh=sec,dl=csec)
+ 0259  58				pop ax		; restore ax
+
+ 025A  8A FA				mov bh,dl	; storing current csec in bh
+
+ 025C  50			top:	push ax		; saving ax
+ 025D  B4 2C				mov ah,2Ch	; DOS function get system time
+ 025F  CD 21				int 21h		; get system time
+ 0261  58				pop ax		; restore ax
+ 0262  38 D7			pass:	cmp bh,dl	; see if csec is still the same
+ 0264  74 F6				jz top		; if same, get time again
+ 0266  8A DA				mov bl,dl	; otherwise, store new time
+ 0268  7C 03				jl less		; if bh is less, a new second has no occured
+ 026A  80 C2 64				add dl,100	; if bh is more, we need to add 100 (carry)
+ 026D  2A D7			less:	sub dl,bh	; get difference in dl
+ 026F  B6 00				mov dh,0	; clear dh
+ 0271  2B C2				sub ax,dx	; subtract that time from ax
+ 0273  8A FB				mov bh,bl	; store new time in bh
+ 0275  83 F8 00				cmp ax,0	; see if ax is now 0
+ 0278  7E 02				jle done	; if yeah, we are done
+ 027A  EB E0				jmp top		; if not DO IT AGAIN!!!
+
+ 027C  9D			done:	popf		; restore regs
+ 027D  5A				pop dx
+ 027E  5B				pop bx
+ 027F  59				pop cx
+ 0280  C3				ret		; RETURN!!!
+ 0281				Delay ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Video modes
+				;///////////////////////////////////////////////////////////////////////////////
+
+				;; Returns:
+				;; 	AL - Video Mode
+				;; 	AH - Number of character columns
+				;; 	BH - Active Page
+ 018E				.data
+ 018E 00			OldVideoMode	BYTE 0
+ 0281				.code
+ 0281				GetVideoMode PROC
+ 0281  51				push	cx
+ 0282  50				push	ax
+
+ 0283  B4 0F				mov	ah, 0fh
+ 0285  CD 10				int	BIOS
+					; mov	cl, al
+ 0287  A2 018E R			mov	OldVideoMode, al
+
+ 028A  58				pop	ax
+					; mov	al, cl
+ 028B  59				pop	cx
+ 028C  C3				ret
+ 028D				GetVideoMode ENDP
+
+				;; AL - Video mode
+ 028D				SetVideoMode PROC
+ 028D  50				push	ax
+
+ 028E  B4 00				mov	ah, 00
+ 0290  CD 10				int	BIOS
+
+ 0292  58				pop	ax
+ 0293  C3				ret
+ 0294				SetVideoMode ENDP
+
+				;; BH - Page number
+				;; CX - X
+				;; DX - Y
+				;;
+				;; Returns:
+				;;
+				;; AL - Color
+
+ 0294				ReadPixel PROC
+ 0294  50				push	ax
+
+ 0295  B4 0D				mov	ah, 0dh
+ 0297  CD 10				int	BIOS
+
+ 0299  58				pop	ax
+ 029A  C3				ret
+ 029B				ReadPixel ENDP
+
+				;; AL - Color
+				;; BH - Page
+				;; CX - X
+				;; DX - Y
+ 029B				WritePixel PROC
+ 029B  50				push	ax
+
+ 029C  B4 FC				mov	ah, 0fch
+ 029E  CD 10				int	BIOS
+
+ 02A0  58				pop	ax
+ 02A1  C3				ret
+ 02A2				WritePixel ENDP
+
+				;; BL - Palette id
+
+ 02A2				SetPalette PROC
+ 02A2  50				push	ax
+ 02A3  53				push	bx
+
+ 02A4  B4 0B				mov	ah, 0bh
+ 02A6  B7 01				mov	bh, 01h
+ 02A8  CD 10				int	BIOS
+
+ 02AA  5B				pop	bx
+ 02AB  58				pop	ax
+ 02AC  C3				ret
+ 02AD				SetPalette ENDP
+
+
+				;; AL - Pallete Index
+				;; AH - Red
+				;; CX - Blue:Green
+
+ 02AD				SetPalleteColor PROC
+ 02AD  50				push	ax
+ 02AE  52				push	dx
+
+ 02AF  BA 03C8				mov	dx, 3c8h	; Video pallete port
+ 02B2  EE				out	dx, al		; Write the color out
+
+ 02B3  BA 03C9				mov	dx, 3c9h	; Color selection port
+
+ 02B6  8A C4				mov	al, ah		; Red
+ 02B8  EE				out	dx, al
+ 02B9  8A C1				mov	al, cl		; Green
+ 02BB  EE				out	dx, al
+ 02BC  8A C5				mov	al, ch		; Blue
+ 02BE  EE				out	dx, al
+
+ 02BF  5A				pop	dx
+ 02C0  58				pop	ax
+ 02C1  C3				ret
+ 02C2				SetPalleteColor ENDP
+
+				;; BX - Color Index
+				;; CX - X
+				;; DX - Y
+ 02C2				DrawPixel PROC
+					;; Screen resolution is 320x200
+
+ 02C2  50				push	ax
+ 02C3  52				push	dx
+ 02C4  57				push	di
+ 02C5  06				push	es
+
+ 02C6  B8 0140				mov	ax, 320
+ 02C9  F7 E2				mul	dx		; AX = 320 * Y
+ 02CB  03 C1				add	ax, cx		; AX = 320 * Y + X
+
+ 02CD  8B F8				mov	di, ax		; Set di to the offset
+
+ 02CF  68 A000				push	0A000h		; Set ES to the video segment
+ 02D2  07				pop	es
+
+ 02D3  26: 88 1D			mov	BYTE PTR es:[di], bl ; Set the pixel to the given color
+
+ 02D6  07				pop	es
+ 02D7  5F				pop	di
+ 02D8  5A				pop	dx
+ 02D9  58				pop	ax
+ 02DA  C3				ret
+ 02DB				DrawPixel ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;		Draw Piano Keys
+				;///////////////////////////////////////////////////////////////////////////////
+
+
+ 02DB				drawPiano PROC
+ 02DB  50				push ax
+ 02DC  53				push bx
+ 02DD  51				push cx
+ 02DE  52				push dx
+ 02DF  9C				pushf
+
+					; Save the Cursor
+ 02E0  E8 FF47				call SaveCursor
+
+					; Draw Borders
+ 02E3  2E: C6 06 0002 R			mov cs:xpos,0
+       00
+ 02E9  2E: C6 06 0003 R			mov cs:ypos,0
+       00
+ 02EF  E8 02EB				call drawLine
+
+					;------------------------------MAKE KEYS----------------------
+ 02F2  E8 0026				call DrawKeys
+ 02F5  2E: C7 06 0000 R			mov cs:space,0
+       0000
+
+					; ;-----------------------------LABEL NOTES---------------------
+ 02FC  2E: C6 06 0002 R			mov cs:xpos,1
+       01
+ 0302  2E: C6 06 0003 R			mov cs:ypos,0
+       00
+ 0308  E8 0066				call labelNotes
+
+					;-------------------------------------------------------------
+
+ 030B  2E: C7 06 0000 R			mov cs:space,0
+       0000
+
+					; mov dx,cs:oldpos
+					; call setCursor
+ 0312  E8 FEE5				call RestoreCursor
+
+ 0315  9D				popf
+ 0316  5A				pop dx
+ 0317  59				pop cx
+ 0318  5B				pop bx
+ 0319  58				pop ax
+ 031A  C3				ret
+				;---------------------------------------------------------PIANO DRAW---
+ 031B				drawPiano ENDP
+
+ 031B				drawKeys PROC
+ 031B  52				push dx
+ 031C  9C				pushf
+
+ 031D  B6 01				mov dh,1
+ 031F  B2 00				mov dl,0
+ 0321  E8 0268			keys:	call drawVert
+ 0324  FE C2				inc dl
+ 0326  E8 01C1				call drawWhite
+ 0329  FE C2				inc dl
+ 032B  E8 00A8				call drawBlack
+ 032E  FE C2				inc dl
+ 0330  E8 01B7				call drawWhite
+ 0333  FE C2				inc dl
+ 0335  E8 009E				call drawBlack
+ 0338  FE C2				inc dl
+ 033A  E8 01AD				call drawWhite
+ 033D  FE C2				inc dl
+ 033F  E8 024A				call drawVert
+ 0342  FE C2				inc dl
+ 0344  E8 01A3				call drawWhite
+ 0347  FE C2				inc dl
+ 0349  E8 008A				call drawBlack
+ 034C  FE C2				inc dl
+ 034E  E8 0199				call drawWhite
+ 0351  FE C2				inc dl
+ 0353  80 FA 50				cmp dl,80
+ 0356  7D 16				jge done
+ 0358  E8 007B				call drawBlack
+ 035B  FE C2				inc dl
+ 035D  E8 018A				call drawWhite
+ 0360  FE C2				inc dl
+ 0362  E8 0071				call drawBlack
+ 0365  FE C2				inc dl
+ 0367  E8 0180				call drawWhite
+ 036A  FE C2				inc dl
+ 036C  EB B3				jmp keys
+
+ 036E  9D			done:	popf
+ 036F  5A				pop dx
+ 0370  C3				ret
+ 0371				drawKeys ENDP
+
+ 0371				labelNotes PROC
+ 0371  50				push ax
+ 0372  53				push bx
+ 0373  51				push cx
+ 0374  52				push dx
+ 0375  9C				pushf
+
+ 0376  2E: 8A 36 0003 R			mov dh,cs:ypos
+ 037B  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 0380  E8 FE68				call setCursor
+
+ 0383  2E: C6 06 0006 R			mov cs:num,'C'
+       43
+ 0389  80 FA 50			L1:	cmp dl,80
+ 038C  7D 3B				jge done
+					;-----------------------------------------BLUE LINE------
+ 038E  B4 0B				mov ah,0Bh
+ 0390  B7 00				mov bh,0
+ 0392  B3 1B				mov bl,00011011b	; yellow text on blue
+ 0394  CD 10				int 10h
+
+ 0396  B4 09				mov ah,9
+ 0398  2E: A0 0006 R			mov al,cs:num
+ 039C  B9 0001				mov cx,1
+ 039F  CD 10				int 10h
+
+ 03A1  2E: FE 06 0006 R			inc cs:num
+ 03A6  2E: 80 3E 0006 R			cmp cs:num,'H'
+       48
+ 03AC  75 06				jnz sev
+ 03AE  2E: C6 06 0006 R			mov cs:num,'A'
+       41
+
+ 03B4  2E: 8A 36 0003 R		sev:	mov dh,cs:ypos
+ 03B9  2E: 80 06 0002 R			add cs:xpos,2
+       02
+ 03BF  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 03C4  E8 FE24				call setCursor
+ 03C7  EB C0				jmp L1
+
+ 03C9  2E: C7 06 0000 R		done:	mov cs:space,0
+       0000
+ 03D0  9D				popf
+ 03D1  5A				pop dx
+ 03D2  59				pop cx
+ 03D3  5B				pop bx
+ 03D4  58				pop ax
+ 03D5  C3				ret
+ 03D6				labelNotes ENDP
+
+ 03D6				drawBlack PROC
+ 03D6  50				push ax
+ 03D7  53				push bx
+ 03D8  51				push cx
+ 03D9  52				push dx
+ 03DA  9C				pushf
+
+ 03DB  2E: 88 36 0003 R			mov cs:ypos,dh
+ 03E0  2E: 88 16 0002 R			mov cs:xpos,dl
+ 03E5  E8 FE03				call setCursor
+
+ 03E8  2E: 83 3E 0000 R		L1:	cmp cs:space,4
+       04
+ 03EE  7D 2A				jge next	; done with divider
+					;-----------------------------------------BLUE LINE------
+ 03F0  B4 0B				mov ah,0Bh
+ 03F2  B7 00				mov bh,0
+ 03F4  B3 0F				mov bl,0Fh	; blue
+ 03F6  CD 10				int 10h
+
+ 03F8  B4 09				mov ah,9
+ 03FA  B0 20				mov al,' '
+ 03FC  B9 0001				mov cx,1
+ 03FF  CD 10				int 10h
+
+ 0401  2E: FE 06 0003 R			inc cs:ypos
+ 0406  2E: 8A 36 0003 R			mov dh,cs:ypos
+ 040B  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 0410  E8 FDD8				call setCursor
+
+ 0413  2E: FF 06 0000 R			inc cs:space
+ 0418  EB CE				jmp L1
+ 041A  2E: C7 06 0000 R		next:	mov cs:space,0
+       0000
+
+ 0421  2E: 83 3E 0000 R		L2:	cmp cs:space,3
+       03
+ 0427  7D 2A				jge done	; done with divider
+					;-----------------------------------------BLUE LINE------
+ 0429  B4 0B				mov ah,0Bh
+ 042B  B7 00				mov bh,0
+ 042D  B3 70				mov bl,70h	; blue
+ 042F  CD 10				int 10h
+
+ 0431  B4 09				mov ah,9
+ 0433  B0 B3				mov al,179
+ 0435  B9 0001				mov cx,1
+ 0438  CD 10				int 10h
+
+ 043A  2E: FE 06 0003 R			inc cs:ypos
+ 043F  2E: 8A 36 0003 R			mov dh,cs:ypos
+ 0444  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 0449  E8 FD9F				call setCursor
+
+ 044C  2E: FF 06 0000 R			inc cs:space
+ 0451  EB CE				jmp L2
+
+ 0453  2E: C7 06 0000 R		done:	mov cs:space,0
+       0000
+ 045A  9D				popf
+ 045B  5A				pop dx
+ 045C  59				pop cx
+ 045D  5B				pop bx
+ 045E  58				pop ax
+ 045F  C3				ret
+ 0460				drawBlack ENDP
+
+ 0460				drawBack PROC
+ 0460  50				push ax
+ 0461  53				push bx
+ 0462  51				push cx
+ 0463  52				push dx
+ 0464  9C				pushf
+
+ 0465  2E: 88 36 0003 R			mov cs:ypos,dh
+ 046A  2E: 88 16 0002 R			mov cs:xpos,dl
+ 046F  E8 FD79				call setCursor
+
+ 0472  2E: 83 3E 0000 R		L1:	cmp cs:space,4
+       04
+ 0478  7D 2A				jge next	; done with divider
+					;-----------------------------------------BLUE LINE------
+ 047A  B4 0B				mov ah,0Bh
+ 047C  B7 00				mov bh,0
+ 047E  B3 0A				mov bl,0Ah	; cyan highlight
+ 0480  CD 10				int 10h
+
+ 0482  B4 09				mov ah,9
+ 0484  B0 DB				mov al,219
+ 0486  B9 0001				mov cx,1
+ 0489  CD 10				int 10h
+
+ 048B  2E: FE 06 0003 R			inc cs:ypos
+ 0490  2E: 8A 36 0003 R			mov dh,cs:ypos
+ 0495  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 049A  E8 FD4E				call setCursor
+
+ 049D  2E: FF 06 0000 R			inc cs:space
+ 04A2  EB CE				jmp L1
+ 04A4  2E: C7 06 0000 R		next:	mov cs:space,0
+       0000
+
+ 04AB  2E: 83 3E 0000 R		L2:	cmp cs:space,3
+       03
+ 04B1  7D 2A				jge done	; done with divider
+					;-----------------------------------------BLUE LINE------
+ 04B3  B4 0B				mov ah,0Bh
+ 04B5  B7 00				mov bh,0
+ 04B7  B3 70				mov bl,70h	; blue
+ 04B9  CD 10				int 10h
+
+ 04BB  B4 09				mov ah,9
+ 04BD  B0 B3				mov al,179
+ 04BF  B9 0001				mov cx,1
+ 04C2  CD 10				int 10h
+
+ 04C4  2E: FE 06 0003 R			inc cs:ypos
+ 04C9  2E: 8A 36 0003 R			mov dh,cs:ypos
+ 04CE  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 04D3  E8 FD15				call setCursor
+
+ 04D6  2E: FF 06 0000 R			inc cs:space
+ 04DB  EB CE				jmp L2
+
+ 04DD  2E: C7 06 0000 R		done:	mov cs:space,0
+       0000
+ 04E4  9D				popf
+ 04E5  5A				pop dx
+ 04E6  59				pop cx
+ 04E7  5B				pop bx
+ 04E8  58				pop ax
+ 04E9  C3				ret
+ 04EA				drawBack ENDP
+
+ 04EA				drawWhite PROC
+ 04EA  50				push ax
+ 04EB  53				push bx
+ 04EC  51				push cx
+ 04ED  52				push dx
+ 04EE  9C				pushf
+
+ 04EF  2E: 88 36 0003 R			mov cs:ypos,dh
+ 04F4  2E: 88 16 0002 R			mov cs:xpos,dl
+ 04F9  E8 FCEF				call setCursor
+
+ 04FC  2E: 83 3E 0000 R		L1:	cmp cs:space,7
+       07
+ 0502  7D 2A				jge done	; done with divider
+					;-----------------------------------------BLUE LINE------
+ 0504  B4 0B				mov ah,0Bh
+ 0506  B7 00				mov bh,0
+ 0508  B3 70				mov bl,70h	; white
+ 050A  CD 10				int 10h
+
+ 050C  B4 09				mov ah,9
+ 050E  B0 20				mov al,' '
+ 0510  B9 0001				mov cx,1
+ 0513  CD 10				int 10h
+
+ 0515  2E: FE 06 0003 R			inc cs:ypos
+ 051A  2E: 8A 36 0003 R			mov dh,cs:ypos
+ 051F  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 0524  E8 FCC4				call setCursor
+
+ 0527  2E: FF 06 0000 R			inc cs:space
+ 052C  EB CE				jmp L1
+
+ 052E  2E: C7 06 0000 R		done:	mov cs:space,0
+       0000
+ 0535  9D				popf
+ 0536  5A				pop dx
+ 0537  59				pop cx
+ 0538  5B				pop bx
+ 0539  58				pop ax
+ 053A  C3				ret
+ 053B				drawWhite ENDP
+
+ 053B				drawYell PROC
+ 053B  50				push ax
+ 053C  53				push bx
+ 053D  51				push cx
+ 053E  52				push dx
+ 053F  9C				pushf
+
+ 0540  2E: 88 36 0003 R			mov cs:ypos,dh
+ 0545  2E: 88 16 0002 R			mov cs:xpos,dl
+ 054A  E8 FC9E				call setCursor
+
+ 054D  2E: 83 3E 0000 R		L1:	cmp cs:space,7
+       07
+ 0553  7D 2A				jge done	; done with divider
+					;-----------------------------------------BLUE LINE------
+ 0555  B4 0B				mov ah,0Bh
+ 0557  B7 00				mov bh,0
+ 0559  B3 0A				mov bl,0Ah	; red on red
+ 055B  CD 10				int 10h
+
+ 055D  B4 09				mov ah,9
+ 055F  B0 DB				mov al,219
+ 0561  B9 0001				mov cx,1
+ 0564  CD 10				int 10h
+
+ 0566  2E: FE 06 0003 R			inc cs:ypos
+ 056B  2E: 8A 36 0003 R			mov dh,cs:ypos
+ 0570  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 0575  E8 FC73				call setCursor
+
+ 0578  2E: FF 06 0000 R			inc cs:space
+ 057D  EB CE				jmp L1
+
+ 057F  2E: C7 06 0000 R		done:	mov cs:space,0
+       0000
+ 0586  9D				popf
+ 0587  5A				pop dx
+ 0588  59				pop cx
+ 0589  5B				pop bx
+ 058A  58				pop ax
+ 058B  C3				ret
+ 058C				drawYell ENDP
+
+ 058C				drawVert PROC
+ 058C  50				push ax
+ 058D  53				push bx
+ 058E  51				push cx
+ 058F  52				push dx
+ 0590  9C				pushf
+
+ 0591  2E: 88 36 0003 R			mov cs:ypos,dh
+ 0596  2E: 88 16 0002 R			mov cs:xpos,dl
+ 059B  E8 FC4D				call setCursor
+
+ 059E				L1:
+ 059E  2E: 83 3E 0000 R			cmp cs:space,7
+       07
+ 05A4  7D 2A				jge done	; done with divider
+					; Black separator line
+ 05A6  B4 0B				mov ah,0Bh
+ 05A8  B7 00				mov bh,0
+ 05AA  B3 70				mov bl,01110000b	; lightgray
+ 05AC  CD 10				int 10h
+
+ 05AE  B4 09				mov ah,9
+ 05B0  B0 B3				mov al,179				; Draw '|'
+ 05B2  B9 0001				mov cx,1
+ 05B5  CD 10				int 10h
+
+ 05B7  2E: FE 06 0003 R			inc cs:ypos
+ 05BC  2E: 8A 36 0003 R			mov dh,cs:ypos
+ 05C1  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 05C6  E8 FC22				call setCursor
+
+ 05C9  2E: FF 06 0000 R			inc cs:space
+ 05CE  EB CE				jmp L1
+
+ 05D0				done:
+ 05D0  2E: C7 06 0000 R			mov cs:space,0
+       0000
+
+ 05D7  9D				popf
+ 05D8  5A				pop dx
+ 05D9  59				pop cx
+ 05DA  5B				pop bx
+ 05DB  58				pop ax
+ 05DC  C3				ret
+ 05DD				drawVert ENDP
+
+ 05DD				drawLine PROC
+ 05DD  9C				pushf
+ 05DE  50				push 	ax
+ 05DF  53				push 	bx
+ 05E0  51				push 	cx
+
+					; call	GetVideoMode
+				; 	push	ax
+				; 	mov	al, 13h		; 320x200 x 256 colors
+				; 	call	SetVideoMode
+				;
+				; 	mov	al, 1		; Set pallete color 1
+				; 	mov	ah, 0fh		; Red
+				; 	mov	cx, 00000h	; CH: Blue, CL: Green
+				; 	call	SetPalleteColor
+				;
+				; 	mov	bx, 1		; Pallete
+				; 	mov	cx, 0		; X
+				; 	mov	dx, 0		; Y
+				; 	jmp	loopcond
+				; top:
+				; 	call	DrawPixel
+				;
+				; 	inc	cx
+				; loopcond:
+				; 	cmp	cx, 2560
+				; 	jl	top
+ 05E1  2E: 8A 36 0003 R			mov dh,cs:ypos
+ 05E6  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 05EB  E8 FBFD				call setCursor
+
+ 05EE				L1:
+ 05EE  2E: 83 3E 0000 R			cmp cs:space,80
+       50
+ 05F4  7D 2A				jge done		; When you reach the border stop
+
+ 05F6  B4 0B				mov ah,0Bh
+ 05F8  B7 00				mov bh,0
+ 05FA  B3 11				mov bl,11h	; blue
+ 05FC  CD 10				int 10h
+
+ 05FE  B4 09				mov ah,9
+ 0600  B0 20				mov al,' '
+ 0602  B9 0001				mov cx,1
+ 0605  CD 10				int 10h
+
+ 0607  2E: 8A 36 0003 R			mov dh,cs:ypos
+ 060C  2E: FE 06 0002 R			inc cs:xpos
+ 0611  2E: 8A 16 0002 R			mov dl,cs:xpos
+ 0616  E8 FBD2				call setCursor
+
+ 0619  2E: FF 06 0000 R			inc cs:space
+ 061E  EB CE				jmp L1
+
+ 0620  2E: C7 06 0000 R		done:	mov cs:space,0
+       0000
+
+					;
+					; mov	ax, 5000
+					; call	Delay
+
+					; pop	ax
+					;call	SetVideoMode	; Restore the video mode
+
+ 0627  59				pop	cx
+ 0628  5B				pop	bx
+ 0629  58				pop	ax
+ 062A  9D				popf
+ 062B  C3				ret
+ 062C				drawLine ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 062C				main PROC
+ 062C  B8 ---- R			mov ax, @data
+ 062F  8E D8				mov ds, ax
+
+					; call playsong
+ 0631  E8 FCA7				call drawpiano
+
+					; loop	lp
+
+ 0634  B8 4C00				mov ax, DOSEXIT
+ 0637  CD 21				int DOS
+ 0639  C3				ret
+ 063A				main ENDP
+				END main
+Microsoft (R) Macro Assembler Version 6.11		    11/10/18 23:02:24
+tunes.asm						     Symbols 2 - 1
+
+
+
+
+Segments and Groups:
+
+                N a m e                 Size     Length   Align   Combine Class
+
+DGROUP . . . . . . . . . . . . .	GROUP
+_DATA  . . . . . . . . . . . . .	16 Bit	 018F	  Word	  Public  'DATA'	
+STACK  . . . . . . . . . . . . .	16 Bit	 0200	  Para	  Stack	  'STACK'	 
+_TEXT  . . . . . . . . . . . . .	16 Bit	 063A	  Word	  Public  'CODE'	
+
+
+Procedures,  parameters and locals:
+
+                N a m e                 Type     Value    Attr
+
+AdvanceCursor  . . . . . . . . .	P Near	 0213	  _TEXT	Length= 0017 Public STDCALL
+Delay  . . . . . . . . . . . . .	P Near	 0243	  _TEXT	Length= 003E Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 025C	  _TEXT	
+  pass . . . . . . . . . . . . .	L Near	 0262	  _TEXT	
+  less . . . . . . . . . . . . .	L Near	 026D	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 027C	  _TEXT	
+DrawPixel  . . . . . . . . . . .	P Near	 02C2	  _TEXT	Length= 0019 Public STDCALL
+DumpLongRegs . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+DumpMem  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+DumpRegs . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+GetVideoMode . . . . . . . . . .	P Near	 0281	  _TEXT	Length= 000C Public STDCALL
+NewLine  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+PlayFrequency  . . . . . . . . .	P Near	 018F	  _TEXT	Length= 0011 Public STDCALL
+PrintVersion . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadChar . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexByte  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexDigit . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexWord  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadInt  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadLine . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadPixel  . . . . . . . . . . .	P Near	 0294	  _TEXT	Length= 0007 Public STDCALL
+RestoreCursor  . . . . . . . . .	P Near	 01FA	  _TEXT	Length= 0019 Public STDCALL
+SaveCursor . . . . . . . . . . .	P Near	 022A	  _TEXT	Length= 0019 Public STDCALL
+SetCursor  . . . . . . . . . . .	P Near	 01EB	  _TEXT	Length= 000F Public STDCALL
+SetPalette . . . . . . . . . . .	P Near	 02A2	  _TEXT	Length= 000B Public STDCALL
+SetPalleteColor  . . . . . . . .	P Near	 02AD	  _TEXT	Length= 0015 Public STDCALL
+SetVideoMode . . . . . . . . . .	P Near	 028D	  _TEXT	Length= 0007 Public STDCALL
+SkipToEOL  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+SpeakerOff . . . . . . . . . . .	P Near	 0092	  _TEXT	Length= 000B Public STDCALL
+SpeakerOn  . . . . . . . . . . .	P Near	 0080	  _TEXT	Length= 0012 Public STDCALL
+  done . . . . . . . . . . . . .	L Near	 008F	  _TEXT	
+TraceRegisterChanges . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+Version  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteBit . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteChar  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexByte . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexDigit  . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexLong . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexWord . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteInt . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WritePixel . . . . . . . . . . .	P Near	 029B	  _TEXT	Length= 0007 Public STDCALL
+WriteString  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteUInt  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+closefil . . . . . . . . . . . .	P Near	 0022	  _TEXT	Length= 001B Public STDCALL
+  err  . . . . . . . . . . . . .	L Near	 0034	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 003A	  _TEXT	
+cmdin  . . . . . . . . . . . . .	P Near	 003D	  _TEXT	Length= 0043 Public STDCALL
+  next . . . . . . . . . . . . .	L Near	 0056	  _TEXT	
+  file . . . . . . . . . . . . .	L Near	 0064	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0077	  _TEXT	
+convertTempo . . . . . . . . . .	P Near	 00BC	  _TEXT	Length= 001C Public STDCALL
+drawBack . . . . . . . . . . . .	P Near	 0460	  _TEXT	Length= 008A Public STDCALL
+  L1 . . . . . . . . . . . . . .	L Near	 0472	  _TEXT	
+  next . . . . . . . . . . . . .	L Near	 04A4	  _TEXT	
+  L2 . . . . . . . . . . . . . .	L Near	 04AB	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 04DD	  _TEXT	
+drawBlack  . . . . . . . . . . .	P Near	 03D6	  _TEXT	Length= 008A Public STDCALL
+  L1 . . . . . . . . . . . . . .	L Near	 03E8	  _TEXT	
+  next . . . . . . . . . . . . .	L Near	 041A	  _TEXT	
+  L2 . . . . . . . . . . . . . .	L Near	 0421	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0453	  _TEXT	
+drawKeys . . . . . . . . . . . .	P Near	 031B	  _TEXT	Length= 0056 Public STDCALL
+  keys . . . . . . . . . . . . .	L Near	 0321	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 036E	  _TEXT	
+drawLine . . . . . . . . . . . .	P Near	 05DD	  _TEXT	Length= 004F Public STDCALL
+  L1 . . . . . . . . . . . . . .	L Near	 05EE	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0620	  _TEXT	
+drawPiano  . . . . . . . . . . .	P Near	 02DB	  _TEXT	Length= 0040 Public STDCALL
+drawVert . . . . . . . . . . . .	P Near	 058C	  _TEXT	Length= 0051 Public STDCALL
+  L1 . . . . . . . . . . . . . .	L Near	 059E	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 05D0	  _TEXT	
+drawWhite  . . . . . . . . . . .	P Near	 04EA	  _TEXT	Length= 0051 Public STDCALL
+  L1 . . . . . . . . . . . . . .	L Near	 04FC	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 052E	  _TEXT	
+drawYell . . . . . . . . . . . .	P Near	 053B	  _TEXT	Length= 0051 Public STDCALL
+  L1 . . . . . . . . . . . . . .	L Near	 054D	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 057F	  _TEXT	
+findNoteFreq . . . . . . . . . .	P Near	 0134	  _TEXT	Length= 00C8 Public STDCALL
+  NoteA  . . . . . . . . . . . .	L Near	 0138	  _TEXT	
+  NoteB  . . . . . . . . . . . .	L Near	 0144	  _TEXT	
+  NoteC  . . . . . . . . . . . .	L Near	 0150	  _TEXT	
+  NoteD  . . . . . . . . . . . .	L Near	 015C	  _TEXT	
+  NoteE  . . . . . . . . . . . .	L Near	 0168	  _TEXT	
+  NoteF  . . . . . . . . . . . .	L Near	 0174	  _TEXT	
+  NoteG  . . . . . . . . . . . .	L Near	 0180	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 018A	  _TEXT	
+findNoteSpeed  . . . . . . . . .	P Near	 00EF	  _TEXT	Length= 0045 Public STDCALL
+  eigthNote  . . . . . . . . . .	L Near	 0101	  _TEXT	
+  quarterNote  . . . . . . . . .	L Near	 010D	  _TEXT	
+  halfNote . . . . . . . . . . .	L Near	 0119	  _TEXT	
+  wholeNote  . . . . . . . . . .	L Near	 0125	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 012D	  _TEXT	
+getCursor  . . . . . . . . . . .	P Near	 01DE	  _TEXT	Length= 000D Public STDCALL
+getTempo . . . . . . . . . . . .	P Near	 009D	  _TEXT	Length= 001F Public STDCALL
+  done . . . . . . . . . . . . .	L Near	 00B6	  _TEXT	
+labelNotes . . . . . . . . . . .	P Near	 0371	  _TEXT	Length= 0065 Public STDCALL
+  L1 . . . . . . . . . . . . . .	L Near	 0389	  _TEXT	
+  sev  . . . . . . . . . . . . .	L Near	 03B4	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 03C9	  _TEXT	
+main . . . . . . . . . . . . . .	P Near	 062C	  _TEXT	Length= 000E Public STDCALL
+openfil  . . . . . . . . . . . .	P Near	 0000	  _TEXT	Length= 0022 Public STDCALL
+  err  . . . . . . . . . . . . .	L Near	 0014	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 001F	  _TEXT	
+playSong . . . . . . . . . . . .	P Near	 01A0	  _TEXT	Length= 003E Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 01AC	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 01D5	  _TEXT	
+readNote . . . . . . . . . . . .	P Near	 00D8	  _TEXT	Length= 0017 Public STDCALL
+readonebyte  . . . . . . . . . .	P Near	 00D8	  _TEXT	Length= 0017 Public STDCALL
+
+
+Symbols:
+
+                N a m e                 Type     Value    Attr
+
+@CodeSize  . . . . . . . . . . .	Number	 0000h	 
+@DataSize  . . . . . . . . . . .	Number	 0000h	 
+@Interface . . . . . . . . . . .	Number	 0003h	 
+@Model . . . . . . . . . . . . .	Number	 0002h	 
+@code  . . . . . . . . . . . . .	Text   	 _TEXT
+@data  . . . . . . . . . . . . .	Text   	 DGROUP
+@fardata?  . . . . . . . . . . .	Text   	 FAR_BSS
+@fardata . . . . . . . . . . . .	Text   	 FAR_DATA
+@stack . . . . . . . . . . . . .	Text   	 DGROUP
+Ab . . . . . . . . . . . . . . .	Word	 0162	  _DATA	
+An . . . . . . . . . . . . . . .	Word	 015E	  _DATA	
+Ash  . . . . . . . . . . . . . .	Word	 0160	  _DATA	
+BIOS_READCURSOR  . . . . . . . .	Number	 0003h	 
+BIOS_WRITECURSOR . . . . . . . .	Number	 0002h	 
+BIOS . . . . . . . . . . . . . .	Number	 0010h	 
+BPM  . . . . . . . . . . . . . .	Word	 0169	  _DATA	
+Bb . . . . . . . . . . . . . . .	Word	 0166	  _DATA	
+Bn . . . . . . . . . . . . . . .	Word	 0164	  _DATA	
+CLOSEFILE  . . . . . . . . . . .	Number	 3E00h	 
+CMDTAIL  . . . . . . . . . . . .	Number	 0080h	 
+Cn . . . . . . . . . . . . . . .	Word	 0146	  _DATA	
+Csh  . . . . . . . . . . . . . .	Word	 0148	  _DATA	
+DOSEXIT  . . . . . . . . . . . .	Number	 4C00h	 
+DOS  . . . . . . . . . . . . . .	Number	 0021h	 
+Dn . . . . . . . . . . . . . . .	Word	 014A	  _DATA	
+Dp . . . . . . . . . . . . . . .	Word	 014E	  _DATA	
+Dsh  . . . . . . . . . . . . . .	Word	 014C	  _DATA	
+Eb . . . . . . . . . . . . . . .	Word	 0152	  _DATA	
+En . . . . . . . . . . . . . . .	Word	 0150	  _DATA	
+FREQUENCY  . . . . . . . . . . .	Number	 001234DCh   
+Fn . . . . . . . . . . . . . . .	Word	 0154	  _DATA	
+Fsh  . . . . . . . . . . . . . .	Word	 0156	  _DATA	
+Gb . . . . . . . . . . . . . . .	Word	 015C	  _DATA	
+Gn . . . . . . . . . . . . . . .	Word	 0158	  _DATA	
+Gsh  . . . . . . . . . . . . . .	Word	 015A	  _DATA	
+MUTED  . . . . . . . . . . . . .	Byte	 0168	  _DATA	
+OLDCURSOR_COLUMN . . . . . . . .	Byte	 0189	  _DATA	
+OLDCURSOR_ROW  . . . . . . . . .	Byte	 0184	  _DATA	
+OPENFILE . . . . . . . . . . . .	Number	 3D00h	 
+OldVideoMode . . . . . . . . . .	Byte	 018E	  _DATA	
+PSP  . . . . . . . . . . . . . .	Number	 6200h	 
+READFILE . . . . . . . . . . . .	Number	 3F00h	 
+READY_TIMER  . . . . . . . . . .	Number	 00B6h	 
+SPEAKER_PORT . . . . . . . . . .	Number	 0061h	 
+TIMER_CONTROL_PORT . . . . . . .	Number	 0043h	 
+TIMER_DATA_PORT  . . . . . . . .	Number	 0042h	 
+bytesread  . . . . . . . . . . .	Word	 0175	  _DATA	
+error  . . . . . . . . . . . . .	Byte	 010D	  _DATA	
+fastestNote  . . . . . . . . . .	Byte	 0177	  _DATA	
+ferror . . . . . . . . . . . . .	Byte	 0126	  _DATA	
+filehandle . . . . . . . . . . .	Word	 0007	  _DATA	
+filename . . . . . . . . . . . .	Byte	 0009	  _DATA	
+foundFrequency . . . . . . . . .	Byte	 0183	  _DATA	
+full_tempo . . . . . . . . . . .	Word	 0178	  _DATA	
+noteRead . . . . . . . . . . . .	Byte	 017A	  _DATA	
+noteSpeed  . . . . . . . . . . .	Byte	 017F	  _DATA	
+num  . . . . . . . . . . . . . .	Byte	 0006	  _DATA	
+oldpos . . . . . . . . . . . . .	Word	 0004	  _DATA	
+space  . . . . . . . . . . . . .	Word	 0000	  _DATA	
+tempo  . . . . . . . . . . . . .	Byte	 016B	  _DATA	
+temp . . . . . . . . . . . . . .	Byte	 0180	  _DATA	
+xpos . . . . . . . . . . . . . .	Byte	 0002	  _DATA	
+ypos . . . . . . . . . . . . . .	Byte	 0003	  _DATA	
+
+	   0 Warnings
+	   0 Errors

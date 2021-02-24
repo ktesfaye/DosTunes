@@ -1,0 +1,1645 @@
+Microsoft (R) Macro Assembler Version 6.11		    11/14/18 14:17:30
+DOSTUNES						     Page 1 - 1
+
+
+				;; NAME: KIRUBEl TESFAYE
+				;; CLASS: CS240
+				;; PROJECT: DOSTUNES
+
+				TITLE DOSTUNES
+
+				INCLUDE cs240.inc
+			      C .NOLIST
+			      C .LIST
+			      C 
+				.386
+
+ = 4C00				DOSEXIT			= 4C00h
+ = 0021				DOS			= 21h
+ = 0010				BIOS			= 10h
+
+ = 001234DC			FREQUENCY		= 1193180
+ = 00B6				READY_TIMER		= 0B6h
+ = 0042				TIMER_DATA_PORT		= 42h
+ = 0043				TIMER_CONTROL_PORT	= 43h
+ = 0061				SPEAKER_PORT		= 61h
+
+ = 3D00				OPENFILE 		= 3D00h
+ = 3F00				READFILE 		= 3F00h
+ = 3E00				CLOSEFILE 		= 3E00h
+ = 6200				PSP 			= 6200h
+ = 0080				CMDTAIL 		= 80h
+
+ = 0003				BIOS_READCURSOR	        = 03h
+ = 0002				BIOS_WRITECURSOR	= 02h
+
+ 0000				.data
+
+ 0000  0078 [			cmdbuffer               WORD 120 dup(0)
+        0000
+       ]
+ 00F0 0000			filehandle              WORD ?
+ 00F2 000A			buffsize                WORD 10
+ 00F4  000A [			buffer                  BYTE 10 dup(0)
+        00
+       ]
+ 00FE 00			tempo			BYTE 0
+ 00FF  000A [			garbageBuffer		BYTE 10 dup(0)
+        00
+       ]
+ 0109 0000			bytesread               WORD ?
+
+ 010B 0000			WAITTIME                WORD 0
+ 010D 0000			LINECOUNT               WORD 0
+ 010F 0000			Full_Tempo              WORD 0
+ 0111  0104 [			filename	        BYTE 260 dup(0)
+        00
+       ]
+
+ 0215 0000			noteLocation		WORD 0
+ 0217 0000			OldVideoMode		WORD 0
+
+ 0219 45 72 72 6F 72 20		error   		BYTE "Error finding the file", 0
+       66 69 6E 64 69 6E
+       67 20 74 68 65 20
+       66 69 6C 65 00
+
+
+ 0230 54BE 4FFC 59C8		A4                      WORD  54BEh,4FFCh,59C8h
+ 0236 4B7F 0000 4FFC		B4                      WORD  4B7Fh,0000h,4FFCh
+ 023C 8E85 8685			C4                      WORD  8E85h,8685h
+ 0240 7EF8 77DB 8685		D4                      WORD  7EF8h,77DBh,8685h
+ 0246 711E 0000 77DB		E4                      WORD  711Eh,0000h,77DBh
+ 024C 6AC4 64C7			F4                      WORD  6AC4h,64C7h
+ 0250 5F23 59C8 64C7		G4                      WORD  5F23h,59C8h,64C7h
+
+ 0000				.code
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;       Delay
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 0000				Delay PROC
+ 0000  51				push cx		; save registers
+ 0001  53				push bx
+ 0002  52				push dx
+ 0003  9C				pushf
+
+ 0004  BB 000A				mov bx,10
+ 0007  BA 0000				mov dx,0
+ 000A  F7 F3				div bx
+
+ 000C  83 F8 00				cmp ax,0
+ 000F  74 28				jz done
+
+ 0011  50				push ax
+ 0012  B4 2C			        mov ah,2Ch	; set DOS function 2C (get system time)
+ 0014  CD 21				int DOS		; get current time (ch=hr,cl=min,dh=sec,dl=csec)
+ 0016  58				pop ax		; restore ax
+
+ 0017  8A FA				mov bh,dl	; storing current csec in bh
+
+ 0019  50			top:	push ax		; saving ax
+ 001A  B4 2C				mov ah,2Ch	; DOS function get system time
+ 001C  CD 21				int DOS		; get system time
+ 001E  58				pop ax		; restore ax
+ 001F  38 D7			pass:	cmp bh,dl	; see if csec is still the same
+ 0021  74 F6				jz top		; if same, get time again
+ 0023  8A DA				mov bl,dl	; otherwise, store new time
+ 0025  7C 03				jl less		; if bh is less, a new second has no occured
+ 0027  80 C2 64				add dl,100	; if bh is more, we need to add 100 (carry)
+ 002A  2A D7			less:	sub dl,bh	; get difference in dl
+ 002C  B6 00				mov dh,0	; clear dh
+ 002E  2B C2				sub ax,dx	; subtract that time from ax
+ 0030  8A FB				mov bh,bl	; store new time in bh
+ 0032  83 F8 00				cmp ax,0	; see if ax is now 0
+ 0035  7E 02				jle done	; if yeah, we are done
+ 0037  EB E0				jmp top		; if not DO IT AGAIN!!!
+
+ 0039  9D			done:	popf		; restore regs
+ 003A  5A				pop dx
+ 003B  5B				pop bx
+ 003C  59				pop cx
+ 003D  C3				ret		; RETURN!!!
+ 003E				Delay ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;       File handling
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 003E				getfilename PROC
+ 003E  9C			        pushf
+ 003F  50			        push ax
+ 0040  53			        push bx
+ 0041  52			        push dx
+ 0042  06			        push es
+ 0043  56			        push si
+ 0044  51			        push cx
+ 0045  55			        push bp
+
+ 0046  B8 6200			        mov ax, PSP			;grab the system stack
+ 0049  CD 21			        int DOS
+
+ 004B  B9 0000			        mov cx, 0
+
+ 004E  8E C3			        mov es, bx			;and get a pointer to it
+ 0050  BE 0080			        mov si, CMDTAIL			;the start of the arg at OFFSET 80
+
+ 0053  46			        inc si				;80-size of the argument
+ 0054  BB 0111 R		        mov bx, OFFSET filename
+
+ 0057				next:
+ 0057  46			        inc si
+ 0058  26: 8A 14		        mov dl, es:[si]
+ 005B  80 FA 21			        cmp dl, 21h			;check for exclamation
+ 005E  72 F7			        jb next
+ 0060  80 FA 7E			        cmp dl, 7Eh			;check for tilde
+ 0063  77 F2			        ja next
+
+ 0065				file:
+ 0065  80 FA 21			        cmp dl, 21h			;check for exclamation
+ 0068  72 0E			        jb done
+ 006A  80 FA 7E			        cmp dl, 7Eh
+ 006D  77 09			        ja done
+ 006F  88 17			        mov [bx], dl
+ 0071  43			        inc bx
+ 0072  46			        inc si
+ 0073  26: 8A 14		        mov dl, es:[si]
+ 0076  EB ED			        jmp file
+ 0078				done:
+ 0078  5D			        pop bp
+ 0079  59			        pop cx
+ 007A  5E			        pop si
+ 007B  07			        pop es
+ 007C  5A			        pop dx
+ 007D  5B			        pop bx
+ 007E  58			        pop ax
+ 007F  9D			        popf
+ 0080  C3			        ret
+ 0081				getfilename ENDP
+
+ 0081				openthisfile PROC	;open file by passing command to ah
+ 0081  50			        push ax
+ 0082  52			        push dx
+
+
+ 0083  B8 3D00			        mov ax, OPENFILE		; call sys intrupt to open a file
+ 0086  BA 0111 R		        mov dx, OFFSET filename 	; take the filename from the data
+
+ 0089  CD 21			        int DOS
+ 008B  72 05			        jc err
+
+ 008D  A3 00F0 R		        mov filehandle, ax		; save the file handle
+ 0090  EB 11			        jmp done
+
+ 0092				err:
+ 0092  BA 0219 R		        mov dx, OFFSET error
+ 0095  E8 0000 E		        call WriteString
+
+ 0098  A1 0217 R			mov ax, OldVideoMode
+ 009B  E8 0320				call SetVideoMode
+
+ 009E  B8 4C00			        mov ax, DOSEXIT
+ 00A1  CD 21			        int DOS
+ 00A3				done:
+ 00A3  5A			        pop dx
+ 00A4  58			        pop ax
+ 00A5  C3			        ret
+ 00A6				openthisfile ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;       Handle reading in
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 00A6				readnewline PROC
+ 00A6  60			        pusha
+
+ 00A7  B8 3F00				mov ax, READFILE
+ 00AA  8B 1E 00F0 R			mov bx, filehandle
+ 00AE  B9 0002				mov cx, 02h
+ 00B1  BA 00FF R			mov dx, OFFSET garbagebuffer
+ 00B4  CD 21				int DOS
+ 00B6  A3 0109 R			mov bytesread, ax
+
+ 00B9  61			        popa
+ 00BA  C3				ret
+ 00BB				readnewline ENDP
+
+ 00BB				readANote PROC		;read bytes equal to cx value
+ 00BB  60			        pusha
+
+ 00BC  B8 0000			         mov ax, 0
+ 00BF  B4 3F			         mov ah,03Fh            ;command to read from file
+ 00C1  8B 1E 00F0 R		         mov bx,filehandle
+ 00C5  B9 0006			         mov cx,06h
+ 00C8  BA 00F4 R		         mov dx,OFFSET buffer   ;read bytes stored in buffe
+ 00CB  CD 21			         int DOS
+ 00CD  A3 0109 R		         mov bytesread, ax      ;store the no of bytes read
+
+ 00D0  61			         popa
+ 00D1  C3			         ret
+ 00D2				readANote ENDP
+
+ 00D2				readTempo PROC
+ 00D2  60			        pusha
+
+ 00D3  B8 3F00				mov ax,READFILE
+ 00D6  8B 1E 00F0 R			mov bx,filehandle
+ 00DA  B9 0004				mov cx,04h
+ 00DD  BA 00FE R			mov dx, OFFSET tempo
+ 00E0  CD 21				int DOS
+ 00E2  A3 0109 R			mov bytesread,ax
+
+ 00E5  61			        popa
+ 00E6  C3			        ret
+ 00E7				readTempo ENDP
+
+ 00E7				ConvertTempo PROC
+ 00E7  60				pusha
+
+ 00E8  E8 FFE7				call readTempo
+ 00EB  BE 00FE R			mov si, OFFSET tempo
+ 00EE  B1 00				mov cl,0
+ 00F0  BB 0000				mov bx,0
+ 00F3  B8 0000				mov ax,0
+ 00F6  BA 0000				mov dx,0
+
+ 00F9				Tem1:
+ 00F9  8A 1C				mov bl,[si]
+ 00FB  80 EB 30				sub bl,30h
+ 00FE  D3 E3				shl bx,cl
+ 0100  03 C3				add ax,bx
+ 0102  BB 0000				mov bx,0
+ 0105  80 C1 04				add cl,4
+ 0108  46				inc si
+ 0109  42				inc dx
+ 010A  83 FA 04				cmp dx,4
+ 010D  72 EA				jb Tem1
+
+ 010F  A3 010F R			mov Full_Tempo,ax
+ 0112  E8 FF91				call readnewline
+
+ 0115  61				popa
+ 0116  C3				ret
+ 0117				ConvertTempo ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;       Handle speaker
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 0117				SpeakerOn PROC
+ 0117  9C				pushf
+ 0118  50				push	ax
+
+ 0119  E4 61				in	al, SPEAKER_PORT		; Read the speaker register
+ 011B  0C 03				or	al, 03h				; Set the two low bits high
+ 011D  E6 61				out	SPEAKER_PORT, al		; Write the speaker register
+
+ 011F				done:
+ 011F  58				pop	ax
+ 0120  9D				popf
+ 0121  C3				ret
+ 0122				SpeakerOn ENDP
+
+ 0122				SpeakerOff PROC
+
+ 0122  9C				pushf
+ 0123  50				push	ax
+
+ 0124  E4 61				in	al, SPEAKER_PORT		; Read the speaker register
+ 0126  24 FC				and	al, 0FCh			; Clear the two low bits high
+ 0128  E6 61				out	SPEAKER_PORT, al		; Write the speaker register
+
+ 012A  58				pop	ax
+ 012B  9D				popf
+ 012C  C3				ret
+ 012D				SpeakerOff ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;       Handle note
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 012D				ReadNoteSpeed PROC
+ 012D  9C			        pushf
+
+ 012E  80 FC 46				cmp ah,'F'
+ 0131  75 0A				jne HalfNote
+ 0133  8B 16 010F R			mov dx,Full_Tempo
+ 0137  89 16 010B R			mov WAITTIME,dx
+ 013B  EB 52				jmp EndofNotes
+ 013D				HalfNote:
+ 013D  80 FC 48				cmp ah,'H'
+ 0140  75 10				jne QuarterNote
+ 0142  8B 16 010F R			mov dx,Full_Tempo
+ 0146  89 16 010B R			mov WaitTime,dx
+ 014A  B1 01				mov cl,1h
+ 014C  D3 2E 010B R			shr WaitTime,cl
+ 0150  EB 3D				jmp EndofNotes
+
+ 0152				QuarterNote:
+ 0152  80 FC 51				cmp ah,'Q'
+ 0155  75 10				jne EigthNote
+ 0157  8B 16 010F R			mov dx,Full_Tempo
+ 015B  89 16 010B R			mov WaitTime,dx
+ 015F  B1 02				mov cl,02h
+ 0161  D3 2E 010B R			shr WaitTime,cl
+ 0165  EB 28				jmp EndofNotes
+
+ 0167				EigthNote:
+ 0167  80 FC 45				cmp ah,'E'
+ 016A  75 10				jne SixteenNote
+ 016C  8B 16 010F R			mov dx,Full_Tempo
+ 0170  89 16 010B R			mov WaitTime,dx
+ 0174  B1 03				mov cl,03h
+ 0176  D3 2E 010B R			shr WaitTime,cl
+ 017A  EB 13				jmp EndofNotes
+
+ 017C				SixteenNote:
+ 017C  80 FC 53				cmp ah,'S'
+ 017F  75 0E				jne EndofNotes
+ 0181  8B 16 010F R			mov dx,Full_Tempo
+ 0185  89 16 010B R			mov WaitTime,dx
+ 0189  B1 04				mov cl,4
+ 018B  D3 2E 010B R			shr WaitTime,cl
+
+ 018F				EndofNotes:
+ 018F  9D			        popf
+ 0190  C3				ret
+ 0191				ReadNoteSpeed ENDP
+
+ 0191				Read_note PROC
+ 0191  9C			        pushf
+
+ 0192  B8 0000			        mov ax,0
+ 0195  8A 64 01			        mov ah,[si+1]
+ 0198				NoteA:
+ 0198  80 FC 41				cmp ah,'A'
+ 019B  75 0D				jne NoteB
+ 019D  B8 0230 R			mov ax ,OFFSET A4
+ 01A0  8B D8				mov bx,ax
+ 01A2  C7 06 0215 R 00F0		mov noteLocation, 240
+ 01A8  EB 6A				jmp done
+ 01AA				NoteB:
+ 01AA  80 FC 42				cmp ah,'B'
+ 01AD  75 0D				jne NoteC
+ 01AF  B8 0236 R			mov ax, OFFSET B4
+ 01B2  8B D8				mov bx,ax
+ 01B4  C7 06 0215 R 0104		mov noteLocation, 260
+ 01BA  EB 58				jmp done
+ 01BC				NoteC:
+ 01BC  80 FC 43				cmp ah,'C'
+ 01BF  75 0D				jne NoteD
+ 01C1  B8 023C R			mov ax,OFFSET C4
+ 01C4  8B D8				mov bx,ax
+ 01C6  C7 06 0215 R 008C		mov noteLocation, 140
+ 01CC  EB 46				jmp done
+ 01CE				NoteD:
+ 01CE  80 FC 44				cmp ah,'D'
+ 01D1  75 0D				jne NoteE
+ 01D3  B8 0240 R			mov ax,OFFSET D4
+ 01D6  8B D8				mov bx,ax
+ 01D8  C7 06 0215 R 00A0		mov noteLocation, 160
+ 01DE  EB 34				jmp done
+ 01E0				NoteE:
+ 01E0  80 FC 45				cmp ah,'E'
+ 01E3  75 0D				jne NoteF
+ 01E5  B8 0246 R			mov ax,OFFSET E4
+ 01E8  8B D8				mov bx,ax
+ 01EA  C7 06 0215 R 00B4		mov noteLocation, 180
+ 01F0  EB 22				jmp done
+ 01F2				NoteF:
+ 01F2  80 FC 46				cmp ah,'F'
+ 01F5  75 0D				jne NoteG
+ 01F7  B8 024C R			mov ax,OFFSET F4
+ 01FA  8B D8				mov bx,ax
+ 01FC  C7 06 0215 R 00C8		mov noteLocation, 200
+ 0202  EB 10				jmp done
+ 0204				NoteG:
+ 0204  80 FC 47				cmp ah,'G'
+ 0207  75 0B				jne done
+ 0209  B8 0250 R			mov ax,OFFSET G4
+ 020C  8B D8				mov bx,ax
+ 020E  C7 06 0215 R 00DC		mov noteLocation, 220
+ 0214				done:
+ 0214  9D			        popf
+ 0215  C3				ret
+ 0216				Read_note ENDP
+
+ 0216				read_octave PROC
+ 0216  9C			        pushf
+
+ 0217  B8 0000			        mov ax, 0
+ 021A  8A 64 02			        mov ah, [si+2]
+ 021D				OCTAVE1:
+ 021D  80 FC 31				cmp ah,'1'
+ 0220  75 04				jne OCTAVE2
+ 0222  B1 00				mov cl,0
+ 0224  EB 58				jmp done
+
+ 0226				OCTAVE2:
+ 0226  80 FC 32				cmp ah,'2'
+ 0229  75 04				jne OCTAVE3
+ 022B  B1 01				mov cl,1
+ 022D  EB 4F				jmp done
+
+ 022F				OCTAVE3:
+ 022F  80 FC 33				cmp ah,'3'
+ 0232  75 04				jne OCTAVE4
+ 0234  B1 02				mov cl,2
+ 0236  EB 46				jmp done
+
+ 0238				OCTAVE4:
+ 0238  80 FC 34				cmp ah,'4'
+ 023B  75 04				jne OCTAVE5
+ 023D  B1 03				mov cl,3
+ 023F  EB 3D				jmp done
+
+ 0241				OCTAVE5:
+ 0241  80 FC 35				cmp ah,'5'
+ 0244  75 04				jne OCTAVE6
+ 0246  B1 04				mov cl,4
+ 0248  EB 34				jmp done
+ 024A				OCTAVE6:
+ 024A  80 FC 36				cmp ah,'6'
+ 024D  75 04				jne OCTAVE7
+ 024F  B1 05				mov cl,5
+ 0251  EB 2B				jmp done
+ 0253				OCTAVE7:
+ 0253  80 FC 37				cmp ah,'7'
+ 0256  75 04				jne OCTAVE8
+ 0258  B1 06				mov cl,6
+ 025A  EB 22				jmp done
+ 025C				OCTAVE8:
+ 025C  80 FC 38				cmp ah,'8'
+ 025F  75 04				jne OCTAVE9
+ 0261  B1 07				mov cl,7
+ 0263  EB 19				jmp done
+ 0265				OCTAVE9:
+ 0265  80 FC 39				cmp ah,'9'
+ 0268  75 04				jne OCTAVE10
+ 026A  B1 08				mov cl,8
+ 026C  EB 10				jmp done
+ 026E				OCTAVE10:
+ 026E  80 FC 41				cmp ah,'A'
+ 0271  75 04				jne OCTAVE0
+ 0273  B1 09				mov cl,9
+ 0275  EB 07				jmp done
+ 0277				OCTAVE0:
+ 0277  80 FC 30				cmp ah,'0'
+ 027A  75 02				jne done
+ 027C  B1 01				mov cl,1
+
+ 027E				done:
+ 027E  9D			        popf
+ 027F  C3				ret
+ 0280				read_octave ENDP
+
+ 0280				findNoteNature PROC
+ 0280  9C			        pushf
+
+ 0281  B8 0000			        mov ax, 0
+ 0284				SharpNote:
+ 0284  8A 64 03			        mov ah,[si+3]
+ 0287  80 FC 53			        cmp ah,'S'
+ 028A  75 0A			        jne FlatNote
+ 028C  B8 0000			        mov ax,0
+ 028F  8B 47 02			        mov ax,[bx+2]
+ 0292  8B D8			        mov bx,ax
+ 0294  EB 19			        jmp done
+ 0296				FlatNote:
+ 0296  B8 0000			        mov ax,0
+ 0299  80 FC 62			        cmp ah,'b'
+ 029C  75 0A			        jne NormalNote
+ 029E  B8 0000			        mov ax,0
+ 02A1  8B 47 04			        mov ax,[bx+4]
+ 02A4  8B D8			        mov bx,ax
+ 02A6  EB 07			        jmp done
+ 02A8				NormalNote:
+ 02A8  B8 0000			        mov ax, 0
+ 02AB  8B 07			        mov ax,[bx]  ;Move counts into ax
+ 02AD  8B D8			        mov bx,ax    ;bx has the number of counts
+ 02AF				done:
+ 02AF  9D			        popf
+ 02B0  C3			        ret
+ 02B1				findNoteNature ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;       Handle song playing
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 02B1				PlayFrequency PROC
+					;; Frequency is found in AH
+ 02B1  9C			        pushf
+
+ 02B2  8B D0			        mov     dx, ax
+
+ 02B4  B0 B6			        mov	al, READY_TIMER			; Get the timer ready
+ 02B6  E6 43				out	TIMER_CONTROL_PORT, al
+
+ 02B8  8A C2				mov	al, dl
+ 02BA  E6 42				out	TIMER_DATA_PORT, al		; Send the count low byte
+
+ 02BC  8A C6				mov	al, dh
+ 02BE  E6 42				out	TIMER_DATA_PORT, al		; Send the count high byte
+
+ 02C0  9D			        popf
+ 02C1  C3				ret
+ 02C2				PlayFrequency ENDP
+
+ 02C2				playSong PROC
+ 02C2  9C			        pushf
+ 02C3  60			        pusha
+
+ 02C4  E8 FD77			        call getfilename
+ 02C7  E8 FDB7			        call openthisfile
+
+ 02CA  E8 FE4A			        call SpeakerOn
+ 02CD  E8 FE17			        call ConvertTempo
+ 02D0				top:
+ 02D0  E8 FDE8			        call readANote
+ 02D3  83 3E 0109 R 00		        cmp bytesread,0
+ 02D8  74 6C			        je done
+
+ 02DA  83 3E 0109 R 4E			cmp bytesread, 78
+ 02DF  75 09				jne continue
+ 02E1  E8 FDC2				call readnewline
+ 02E4  C7 06 0109 R 0000		mov bytesread, 0
+ 02EA				continue:
+ 02EA  BE 00F4 R		        mov si, OFFSET buffer   ; grab a note to play
+ 02ED  B8 0000			        mov ax, 0
+ 02F0  8A 24			        mov ah, [si]
+
+ 02F2  80 FC 30			        cmp ah, '0'             ; check if we are at the end of file
+ 02F5  75 0A			        jne cont            ; if so exit
+ 02F7  8A 64 02			        mov ah,[si+2]
+ 02FA  80 FC 30			        cmp ah,'0'
+ 02FD  75 02			        jne cont
+ 02FF  EB 45			        jmp done
+
+ 0301				cont:
+ 0301  E8 FE29			        call ReadNoteSpeed
+
+ 0304  E8 FE8A			        call Read_note
+
+ 0307  80 FC 52				cmp ah, 'R'
+ 030A  75 11				jne RestNote
+ 030C  A1 010B R			mov ax, WaitTime
+ 030F  C1 E8 04				shr ax, 4
+ 0312  E8 FCEB			        call Delay
+
+ 0315  B8 0020				mov ax,20h
+ 0318  E8 FCE5			        call Delay
+ 031B  EB B3				jmp top
+ 031D				RestNote:
+ 031D  E8 FF60				call findNoteNature
+
+ 0320  E8 FEF3			        call read_octave
+ 0323  80 FC 30			        cmp ah,'0'
+ 0326  75 06			        jne RightShift
+
+ 0328				LeftShift:
+ 0328  D3 E3			        shl bx,cl
+ 032A  8B C3			        mov ax,bx
+ 032C  EB 04			        jmp SpeakerOut
+
+ 032E				RightShift:
+ 032E  D3 EB			        shr bx,cl
+ 0330  8B C3			        mov ax,bx
+
+ 0332				SpeakerOut:
+ 0332  E8 FF7C			        call PlayFrequency
+				        ; mov ax, WaitTime
+				        ; call Delay
+ 0335  E8 0318			 	call highlightNote
+
+					;
+ 0338  E8 FDE7			        call SpeakerOff
+
+ 033B  B8 0020				mov ax,20h
+ 033E  E8 FCBF			        call Delay
+
+ 0341  E8 FDD3			        call SpeakerOn
+
+					; push cx
+					; mov cx, 20
+					; pop cx
+ 0344  EB 8A			        jmp top
+
+ 0346				done:
+ 0346  E8 FDD9			        call SpeakerOff
+
+ 0349  61			        popa
+ 034A  9D			        popf
+ 034B  C3			        ret
+ 034C				playSong ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Cursor munpliation
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 034C				getCursor PROC
+ 034C  50				push ax
+ 034D  53				push bx
+ 034E  51				push cx
+
+ 034F  B4 03				mov ah,3
+ 0351  B7 00				mov bh,0
+ 0353  CD 10				int 10h
+
+ 0355  59				pop cx
+ 0356  5B				pop bx
+ 0357  58				pop ax
+ 0358  C3				ret
+ 0359				getCursor ENDP
+
+ 0359				SetCursor PROC
+				;Set the cursor to the top right poistion
+ 0359  9C			        pushf
+ 035A  50			        push 	ax
+ 035B  53			        push 	bx
+ 035C  51			        push 	cx
+
+ 035D  B7 00				mov 	bh, 0
+ 035F  B4 02			        mov 	ah, BIOS_WRITECURSOR
+ 0361  CD 10			        int 	BIOS
+
+ 0363  59			        pop 	cx
+ 0364  5B			        pop 	bx
+ 0365  58			        pop 	ax
+ 0366  9D			        popf
+ 0367  C3			        ret
+ 0368				SetCursor ENDP
+
+ 0368				RestoreCursor PROC
+				;restore the old cursor position
+ 0368  9C			        pushf
+ 0369  50			        push 	ax
+ 036A  53			        push 	bx
+ 036B  51			        push 	cx
+ 036C  52			        push 	dx
+
+ 036D  8A 36 0256 R		        mov 	dh, OLDCURSOR_ROW
+ 0371  8A 16 025B R		        mov 	dl, OLDCURSOR_COLUMN
+
+ 0375  B7 00				mov 	bh, 0
+ 0377  B4 02			        mov 	ah, BIOS_WRITECURSOR
+ 0379  CD 10			        int 	BIOS
+
+ 037B  5A			        pop 	dx
+ 037C  59			        pop 	cx
+ 037D  5B			        pop 	bx
+ 037E  58			        pop 	ax
+ 037F  9D			        popf
+ 0380  C3			        ret
+ 0381				RestoreCursor ENDP
+
+ 0381				AdvanceCursor PROC
+				; Advances the cursor one space forward.
+ 0381  50				push	ax
+ 0382  53				push	bx
+ 0383  51				push	cx
+ 0384  52				push	dx
+ 0385  9C				pushf
+
+ 0386  B7 00				mov	bh, 0			; BH = video page
+ 0388  B4 03				mov	ah, BIOS_READCURSOR	; AH = interrupt
+ 038A  CD 10				int	BIOS			; DH = row, DL = column
+
+ 038C  FE C2				inc	DL			; DL = new column
+ 038E  B4 02				mov	ah, BIOS_WRITECURSOR	; AH = interrupt
+ 0390  CD 10				int	BIOS
+
+ 0392  9D				popf
+ 0393  5A				pop	dx
+ 0394  59				pop	cx
+ 0395  5B				pop	bx
+ 0396  58				pop	ax
+ 0397  C3				ret
+ 0398				AdvanceCursor ENDP
+
+ 0256				.data
+ 0256  0004 [			OLDCURSOR_ROW    BYTE 4 dup(0), 0
+        00
+       ] 00
+ 025B  0004 [			OLDCURSOR_COLUMN BYTE 4 dup(0), 0
+        00
+       ] 00
+ 0398				.code
+ 0398				SaveCursor PROC
+				;save the old cursor position
+ 0398  9C			        pushf
+ 0399  50			        push 	ax
+ 039A  53			        push 	bx
+ 039B  51			        push 	cx
+ 039C  52			        push 	dx
+
+ 039D  B7 00			        mov 	bh, 0
+ 039F  B4 03			        mov 	ah, BIOS_READCURSOR
+ 03A1  CD 10			        int 	BIOS
+
+ 03A3  88 36 0256 R		        mov 	OLDCURSOR_ROW, dh
+ 03A7  88 16 025B R		        mov 	OLDCURSOR_COLUMN, dl
+
+ 03AB  5A			        pop 	dx
+ 03AC  59			        pop 	cx
+ 03AD  5B			        pop 	bx
+ 03AE  58			        pop 	ax
+ 03AF  9D			        popf
+ 03B0  C3			        ret
+ 03B1				SaveCursor ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Video modes
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 03B1				GetVideoMode PROC
+ 03B1  51				push	cx
+ 03B2  50				push	ax
+
+ 03B3  B4 0F				mov	ah, 0fh
+ 03B5  CD 10				int	BIOS
+ 03B7  8A C8				mov	cl, al
+
+ 03B9  58				pop	ax
+ 03BA  8A C1				mov	al, cl
+ 03BC  59				pop	cx
+ 03BD  C3				ret
+ 03BE				GetVideoMode ENDP
+
+					;; AL - Video mode
+
+ 03BE				SetVideoMode PROC
+ 03BE  50				push	ax
+
+ 03BF  B4 00				mov	ah, 00
+ 03C1  CD 10				int	BIOS
+
+ 03C3  58				pop	ax
+ 03C4  C3				ret
+ 03C5				SetVideoMode ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Pixel Manupilation
+				;///////////////////////////////////////////////////////////////////////////////
+
+					;; BH - Page number
+					;; CX - X
+					;; DX - Y
+					;;
+					;; Returns:
+					;;
+					;; AL - Color
+ 03C5				ReadPixel PROC
+ 03C5  50				push	ax
+
+ 03C6  B4 0D				mov	ah, 0dh
+ 03C8  CD 10				int	BIOS
+
+ 03CA  58				pop	ax
+ 03CB  C3				ret
+ 03CC				ReadPixel ENDP
+
+					;; AL - Color
+					;; BH - Page
+					;; CX - X
+					;; DX - Y
+ 03CC				WritePixel PROC
+ 03CC  50				push	ax
+
+ 03CD  B4 FC				mov	ah, 0fch
+ 03CF  CD 10				int	BIOS
+
+ 03D1  58				pop	ax
+ 03D2  C3				ret
+ 03D3				WritePixel ENDP
+
+					;; BX - Color Index
+					;; CX - X
+					;; DX - Y
+ 03D3				DrawPixel PROC
+					;; Screen resolution is 320x200
+
+ 03D3  50				push	ax
+ 03D4  52				push	dx
+ 03D5  57				push	di
+ 03D6  06				push	es
+
+ 03D7  B8 0140				mov	ax, 320
+ 03DA  F7 E2				mul	dx		; AX = 320 * Y
+ 03DC  03 C1				add	ax, cx		; AX = 320 * Y + X
+
+ 03DE  8B F8				mov	di, ax		; Set di to the offset
+
+ 03E0  68 A000				push	0A000h		; Set ES to the video segment
+ 03E3  07				pop	es
+
+ 03E4  26: 88 1D			mov	BYTE PTR es:[di], bl ; Set the pixel to the given color
+
+ 03E7  07				pop	es
+ 03E8  5F				pop	di
+ 03E9  5A				pop	dx
+ 03EA  58				pop	ax
+ 03EB  C3				ret
+ 03EC				DrawPixel ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Palatte setup
+				;///////////////////////////////////////////////////////////////////////////////
+
+					;; BL - Palette id
+
+ 03EC				SetPalette PROC
+ 03EC  50				push	ax
+ 03ED  53				push	bx
+
+ 03EE  B4 0B				mov	ah, 0bh
+ 03F0  B7 01				mov	bh, 01h
+ 03F2  CD 10				int	BIOS
+
+ 03F4  5B				pop	bx
+ 03F5  58				pop	ax
+ 03F6  C3				ret
+ 03F7				SetPalette ENDP
+
+					;; AL - Pallete Index
+					;; AH - Red
+					;; CX - Blue:Green
+
+ 03F7				SetPalleteColor PROC
+ 03F7  50				push	ax
+ 03F8  52				push	dx
+
+ 03F9  BA 03C8				mov	dx, 3c8h	; Video pallete port
+ 03FC  EE				out	dx, al		; Write the color out
+
+ 03FD  BA 03C9				mov	dx, 3c9h	; Color selection port
+
+ 0400  8A C4				mov	al, ah		; Red
+ 0402  EE				out	dx, al
+ 0403  8A C1				mov	al, cl		; Green
+ 0405  EE				out	dx, al
+ 0406  8A C5				mov	al, ch		; Blue
+ 0408  EE				out	dx, al
+
+ 0409  5A				pop	dx
+ 040A  58				pop	ax
+ 040B  C3				ret
+ 040C				SetPalleteColor ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Draw the actuall piano
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 040C				drawPiano PROC
+ 040C  60			        pusha
+
+ 040D  E8 FFA1			        call	GetVideoMode
+ 0410  50			        push	ax
+ 0411  B0 13			        mov	al, 13h		; 320x200 x 256 colors
+ 0413  E8 FFA8			        call	SetVideoMode
+
+ 0416  E8 020E				call	drawlayout
+
+ 0419  B0 01			        mov	al, 1		; Set pallete color 1
+ 041B  B4 FF			        mov	ah, 255	; Red
+ 041D  B5 FF			        mov	ch, 255	; CH: Blue, CL: Green
+ 041F  B1 FF				mov	cl, 255
+ 0421  E8 FFD3			        call	SetPalleteColor
+
+ 0424  E8 0012				call	drawkeys
+
+ 0427  B8 0BB8				mov	ax, 3000
+ 042A  E8 FBD3				call	Delay
+ 042D  E8 FE92				call	PlaySong
+
+ 0430  58			        pop	ax
+ 0431  A3 0217 R			mov	OldVideoMode, ax
+ 0434  E8 FF87				call	SetVideoMode
+
+ 0437  61			        popa
+ 0438  C3			        ret
+ 0439				drawPiano ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;	Piano key stuff
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 0439				drawkeys PROC
+ 0439  9C				pushf
+ 043A  51				push	cx
+ 043B  56				push	si
+
+ 043C  B9 0000				mov	cx, 0		; X
+ 043F  BA 0000				mov	dx, 0		; Y
+
+ 0442  E8 0121				call	drawhori
+
+ 0445  E8 0132				call	drawvert
+					; call	highlightNote
+
+ 0448  51				push	cx
+ 0449  B9 000F				mov	cx, 15
+ 044C  E8 017E				call	drawblack
+ 044F  59				pop	cx
+
+ 0450  83 C1 14				add	cx, 20
+ 0453  BA 0000				mov	dx, 0
+
+ 0456  E8 0121				call	drawvert
+ 0459  51				push	cx
+ 045A  B9 0023				mov	cx, 35
+ 045D  E8 016D				call	drawblack
+ 0460  59				pop	cx
+
+ 0461  83 C1 14				add	cx, 20
+ 0464  BA 0000				mov	dx, 0
+
+ 0467  E8 0110				call	drawvert
+
+ 046A  83 C1 14				add	cx, 20
+ 046D  BA 0000				mov	dx, 0
+
+ 0470  E8 0107				call	drawvert
+ 0473  51				push	cx
+ 0474  B9 004B				mov	cx, 75
+ 0477  E8 0153				call	drawblack
+ 047A  59				pop	cx
+
+ 047B  83 C1 14				add	cx, 20
+ 047E  BA 0000				mov	dx, 0
+
+ 0481  E8 00F6				call	drawvert
+ 0484  51				push	cx
+ 0485  B9 005F				mov	cx, 95
+ 0488  E8 0142				call	drawblack
+ 048B  59				pop	cx
+
+ 048C  83 C1 14				add	cx, 20
+ 048F  BA 0000				mov	dx, 0
+
+ 0492  E8 00E5				call	drawvert
+ 0495  51				push	cx
+ 0496  B9 0073				mov	cx, 115
+ 0499  E8 0131				call	drawblack
+ 049C  59				pop	cx
+
+ 049D  83 C1 14				add	cx, 20
+ 04A0  BA 0000				mov	dx, 0
+
+ 04A3  E8 00D4				call	drawvert
+
+ 04A6  83 C1 14				add	cx, 20
+ 04A9  BA 0000				mov	dx, 0
+
+ 04AC  E8 00CB				call	drawvert
+
+ 04AF  83 C1 14				add	cx, 20
+ 04B2  BA 0000				mov	dx, 0
+
+ 04B5  E8 00C2				call	drawvert
+
+ 04B8  83 C1 14				add	cx, 20
+ 04BB  BA 0000				mov	dx, 0
+
+ 04BE  E8 00B9				call	drawvert
+ 04C1  51				push	cx
+ 04C2  B9 009B				mov	cx, 155
+ 04C5  E8 0105				call	drawblack
+ 04C8  59				pop	cx
+
+ 04C9  83 C1 14				add	cx, 20
+ 04CC  BA 0000				mov	dx, 0
+
+ 04CF  E8 00A8				call	drawvert
+ 04D2  51				push	cx
+ 04D3  B9 00AF				mov	cx, 175
+ 04D6  E8 00F4				call	drawblack
+ 04D9  59				pop	cx
+
+ 04DA  83 C1 14				add	cx, 20
+ 04DD  BA 0000				mov	dx, 0
+
+ 04E0  E8 0097				call	drawvert
+ 04E3  51				push	cx
+ 04E4  B9 00D7				mov	cx, 215
+ 04E7  E8 00E3				call	drawblack
+ 04EA  59				pop	cx
+
+ 04EB  83 C1 14				add	cx, 20
+ 04EE  BA 0000				mov	dx, 0
+
+ 04F1  E8 0086				call	drawvert
+ 04F4  51				push	cx
+ 04F5  B9 00EB				mov	cx, 235
+ 04F8  E8 00D2				call	drawblack
+ 04FB  59				pop	cx
+
+ 04FC  83 C1 14				add	cx, 20
+ 04FF  BA 0000				mov	dx, 0
+
+ 0502  E8 0075				call	drawvert
+ 0505  51				push	cx
+ 0506  B9 00FF				mov	cx, 255
+ 0509  E8 00C1				call	drawblack
+ 050C  59				pop	cx
+
+ 050D  83 C1 14				add	cx, 20
+ 0510  BA 0000				mov	dx, 0
+
+ 0513  E8 0064				call	drawvert
+
+ 0516  83 C1 14				add	cx, 20
+ 0519  BA 0000				mov	dx, 0
+
+ 051C  E8 005B				call	drawvert
+ 051F  51				push	cx
+ 0520  B9 0127				mov	cx, 295
+ 0523  E8 00A7				call	drawblack
+ 0526  59				pop	cx
+
+ 0527  83 C1 14				add	cx, 20
+ 052A  BA 0000				mov	dx, 0
+
+ 052D  E8 004A				call	drawvert
+ 0530  51				push	cx
+ 0531  B9 013B				mov	cx, 315
+ 0534  E8 0069				call	drawlastblack
+ 0537  59				pop	cx
+
+ 0538  E8 FE5D				call	savecursor
+
+ 053B  B2 50				mov	dl, 80
+ 053D  E8 FE19				call	setcursor
+
+ 0540  E8 0023				call	drawhori
+ 0543  E8 FE22				call	RestoreCursor
+
+ 0546  5E				pop	si
+ 0547  59				pop	cx
+ 0548  9D				popf
+ 0549  C3				ret
+ 054A				drawkeys ENDP
+
+ 054A				drawkeys? PROC
+ 054A  9C				pushf
+ 054B  51				push	cx
+ 054C  56				push	si
+
+ 054D  B9 0000				mov	cx, 0		; X
+ 0550  BA 0000				mov	dx, 0		; Y
+ 0553				lp:
+ 0553  E8 0024				call	drawvert
+
+ 0556  83 C1 28				add	cx, 40
+ 0559  BA 0000				mov	dx, 0
+
+ 055C  46				inc	si
+ 055D  83 FE 05				cmp	si, 5
+ 0560  75 F1				jne	lp
+
+ 0562  5E				pop	si
+ 0563  59				pop	cx
+ 0564  9D				popf
+ 0565  C3				ret
+ 0566				drawkeys? ENDP
+
+ 0566				drawhori PROC
+
+ 0566  BB 00B4				mov	bx, 180		; Pallete
+ 0569  BE 0000				mov	si, 0
+ 056C  EB 05				jmp	loopcond2
+ 056E				top2:
+ 056E  E8 FE62				call	DrawPixel
+ 0571  41				inc	cx
+ 0572  46				inc	si
+ 0573				loopcond2:
+ 0573  81 FE 0B40			cmp	si, 2880
+ 0577  7C F5				jl	top2
+
+ 0579  C3				ret
+ 057A				drawhori ENDP
+
+ 057A				drawvert PROC
+
+ 057A  BB 00F0				mov	bx, 240		; Pallete
+ 057D  BE 0000				mov	si, 0
+ 0580  EB 05				jmp	loopcond
+ 0582				top:
+ 0582  E8 FE4E				call	DrawPixel
+ 0585  42				inc	dx
+ 0586  46				inc	si
+ 0587				loopcond:
+ 0587  83 FE 54				cmp	si, 84
+ 058A  7C F6				jl	top
+
+ 058C  C3				ret
+ 058D				drawvert ENDP
+
+ 058D				drawBvert PROC
+
+ 058D  BB 00F5				mov	bx, 245 		; Pallete
+ 0590  BE 0000				mov	si, 0
+ 0593  EB 05				jmp	loopcond
+ 0595				top:
+ 0595  E8 FE3B				call	DrawPixel
+ 0598  42				inc	dx
+ 0599  46				inc	si
+ 059A				loopcond:
+ 059A  83 FE 32				cmp	si, 50
+ 059D  7C F6				jl	top
+
+ 059F  C3				ret
+ 05A0				drawBvert ENDP
+
+ 05A0				drawlastblack PROC
+ 05A0  60				pusha
+
+ 05A1  BA 0009				mov	dx, 9
+ 05A4  E8 FFE6				call	drawBvert
+
+ 05A7  83 C1 01				add	cx, 1
+ 05AA  BA 0009				mov	dx, 9
+
+ 05AD  E8 FFDD				call	drawBvert
+
+ 05B0  83 C1 01				add	cx, 1
+ 05B3  BA 0009				mov	dx, 9
+
+ 05B6  E8 FFD4				call	drawBvert
+
+ 05B9  83 C1 01				add	cx, 1
+ 05BC  BA 0009				mov	dx, 9
+
+ 05BF  E8 FFCB				call	drawBvert
+
+ 05C2  83 C1 01				add	cx, 1
+ 05C5  BA 0009				mov	dx, 9
+
+ 05C8  E8 FFC2				call	drawBvert
+
+ 05CB  61				popa
+ 05CC  C3				ret
+ 05CD				drawlastblack ENDP
+
+ 05CD				drawblack PROC
+ 05CD  60				pusha
+
+ 05CE  BA 0009				mov	dx, 9
+ 05D1  E8 FFB9				call	drawBvert
+
+ 05D4  83 C1 01				add	cx, 1
+ 05D7  BA 0009				mov	dx, 9
+
+ 05DA  E8 FFB0				call	drawBvert
+
+ 05DD  83 C1 01				add	cx, 1
+ 05E0  BA 0009				mov	dx, 9
+
+ 05E3  E8 FFA7				call	drawBvert
+
+ 05E6  83 C1 01				add	cx, 1
+ 05E9  BA 0009				mov	dx, 9
+
+ 05EC  E8 FF9E				call	drawBvert
+
+ 05EF  83 C1 01				add	cx, 1
+ 05F2  BA 0009				mov	dx, 9
+
+ 05F5  E8 FF95				call	drawBvert
+
+ 05F8  83 C1 01				add	cx, 1
+ 05FB  BA 0009				mov	dx, 9
+
+ 05FE  E8 FF8C				call	drawBvert
+
+ 0601  83 C1 01				add	cx, 1
+ 0604  BA 0009				mov	dx, 9
+
+ 0607  E8 FF83				call	drawBvert
+
+ 060A  83 C1 01				add	cx, 1
+ 060D  BA 0009				mov	dx, 9
+
+ 0610  E8 FF7A				call	drawBvert
+
+ 0613  83 C1 01				add	cx, 1
+ 0616  BA 0009				mov	dx, 9
+
+ 0619  E8 FF71				call	drawBvert
+
+ 061C  83 C1 01				add	cx, 1
+ 061F  BA 0009				mov	dx, 9
+
+ 0622  E8 FF68				call	drawBvert
+
+ 0625  61				popa
+ 0626  C3				ret
+ 0627				drawblack ENDP
+
+ 0627				drawlayout PROC
+ 0627  9C				pushf
+ 0628  60				pusha
+
+					; call	GetVideoMode
+					; push	ax
+					; mov	al, 13h		; 320x200 x 256 colors
+					; call	SetVideoMode
+
+ 0629  B0 01				mov	al, 1		; Set pallete color 1
+ 062B  B4 FF				mov	ah, 255	; Red
+ 062D  B5 FF				mov	ch, 255	; CH: Blue, CL: Green
+ 062F  B1 FF				mov	cl, 255
+ 0631  E8 FDC3				call	SetPalleteColor
+
+ 0634  BB 0001				mov	bx, 1		; Pallete
+ 0637  BA 0000				mov	dx, 0		; Y
+ 063A  B9 0000				mov	cx, 0		; X
+ 063D  BE 0000				mov	si, 0
+ 0640  EB 05				jmp	loopcond2
+ 0642				top2:
+ 0642  E8 FD8E				call	DrawPixel
+ 0645  41				inc	cx
+ 0646  46				inc	si
+ 0647				loopcond2:
+ 0647  81 FE 7530			cmp	si, 30000
+ 064B  7C F5				jl	top2
+
+					; mov     ax, 5200
+					; call    Delay
+					;
+					; pop	ax
+					; call	SetVideoMode
+
+ 064D  61				popa
+ 064E  9D				popf
+ 064F  C3				ret
+ 0650				drawlayout ENDP
+
+ 0650				highlightNote PROC
+ 0650  50				push	ax
+ 0651  51				push	cx
+ 0652  53				push	bx
+
+ 0653  8B 0E 0215 R			mov	cx, noteLocation
+ 0657  51				push	cx
+ 0658  BB 0078				mov	bx, 120
+ 065B  E8 0017				call	drawGreen
+
+ 065E  A1 010B R			mov 	ax, WaitTime
+ 0661  E8 F99C				call 	Delay
+
+ 0664  BB 0001				mov	bx, 1
+ 0667  59				pop	cx
+ 0668  E8 000A				call	drawGreen
+ 066B  C7 06 0215 R 0000		mov	noteLocation, 0
+
+ 0671  5B				pop	bx
+ 0672  59				pop	cx
+ 0673  58				pop	ax
+ 0674  C3				ret
+ 0675				highlightNote ENDP
+
+ 0675				drawGreen PROC
+ 0675  60				pusha
+
+ 0676  60				pusha
+					; call	drawKeys
+ 0677  61				popa
+
+ 0678  83 C1 04				add	cx, 4
+					; mov	dx, 9
+					; call	drawGVert
+					;
+					; add	cx, 1
+					; mov	dx, 9
+					;
+					; call	drawGVert
+					;
+					; add	cx, 1
+					; mov	dx, 9
+					;
+					; call	drawGVert
+					;
+					; add	cx, 1
+					; mov	dx, 9
+					;
+					; call	drawGVert
+					;
+					; add	cx, 1
+					; mov	dx, 9
+					;
+					; call	drawGVert
+
+ 067B  83 C1 01				add	cx, 1
+ 067E  BA 0009				mov	dx, 9
+
+ 0681  E8 005B				call	drawGVert
+
+ 0684  83 C1 01				add	cx, 1
+ 0687  BA 0009				mov	dx, 9
+
+ 068A  E8 0052				call	drawGVert
+
+ 068D  83 C1 01				add	cx, 1
+ 0690  BA 0009				mov	dx, 9
+
+ 0693  E8 0049				call	drawGVert
+
+ 0696  83 C1 01				add	cx, 1
+ 0699  BA 0009				mov	dx, 9
+
+ 069C  E8 0040				call	drawGVert
+
+ 069F  83 C1 01				add	cx, 1
+ 06A2  BA 0009				mov	dx, 9
+
+ 06A5  E8 0037				call	drawGVert
+
+ 06A8  BA 0009				mov	dx, 9
+ 06AB  E8 0031				call	drawGVert
+
+ 06AE  83 C1 01				add	cx, 1
+ 06B1  BA 0009				mov	dx, 9
+
+ 06B4  E8 0028				call	drawGVert
+
+ 06B7  83 C1 01				add	cx, 1
+ 06BA  BA 0009				mov	dx, 9
+
+ 06BD  E8 001F				call	drawGVert
+
+ 06C0  83 C1 01				add	cx, 1
+ 06C3  BA 0009				mov	dx, 9
+
+ 06C6  E8 0016				call	drawGVert
+
+ 06C9  83 C1 01				add	cx, 1
+ 06CC  BA 0009				mov	dx, 9
+
+ 06CF  E8 000D				call	drawGVert
+
+ 06D2  83 C1 01				add	cx, 1
+ 06D5  BA 0009				mov	dx, 9
+
+ 06D8  E8 0004				call	drawGVert
+
+					; add	cx, 1
+					; mov	dx, 9
+					;
+					; call	drawGVert
+					;
+					; add	cx, 1
+					; mov	dx, 9
+					;
+					; call	drawGVert
+					;
+					; add	cx, 1
+					; mov	dx, 9
+					;
+					; call	drawGVert
+					;
+					; add	cx, 1
+					; mov	dx, 9
+					;
+					; call	drawGVert
+					; add	cx, 1
+					; mov	dx, 9
+					;
+					; call	drawGVert
+
+ 06DB  60				pusha
+					; call	drawkeys
+ 06DC  61				popa
+ 06DD  61				popa
+ 06DE  C3				ret
+ 06DF				drawGreen ENDP
+
+ 06DF				drawGVert PROC
+ 06DF  9C				pushf
+ 06E0  56				push	si
+ 06E1  BE 0000				mov	si, 0
+ 06E4  EB 05				jmp	loopcond
+ 06E6				top:
+ 06E6  E8 FCEA				call	DrawPixel
+ 06E9  42				inc	dx
+ 06EA  46				inc	si
+ 06EB				loopcond:
+ 06EB  83 FE 51				cmp	si, 81
+ 06EE  7C F6				jl	top
+
+ 06F0  5E				pop si
+ 06F1  9D				popf
+ 06F2  C3				ret
+ 06F3				drawGVert ENDP
+
+				;///////////////////////////////////////////////////////////////////////////////
+				;///////////////////////////////////////////////////////////////////////////////
+
+ 06F3				main PROC
+ 06F3  B8 ---- R			mov ax,@data
+ 06F6  8E D8				mov ds,ax
+
+ 06F8  E8 FD11				call drawPiano
+
+ 06FB  B8 4C00				mov ax,DOSEXIT
+ 06FE  CD 21				int DOS
+ 0700				main ENDP
+				END main
+Microsoft (R) Macro Assembler Version 6.11		    11/14/18 14:17:30
+DOSTUNES						     Symbols 2 - 1
+
+
+
+
+Segments and Groups:
+
+                N a m e                 Size     Length   Align   Combine Class
+
+DGROUP . . . . . . . . . . . . .	GROUP
+_DATA  . . . . . . . . . . . . .	16 Bit	 0260	  Word	  Public  'DATA'	
+STACK  . . . . . . . . . . . . .	16 Bit	 0200	  Para	  Stack	  'STACK'	 
+_TEXT  . . . . . . . . . . . . .	16 Bit	 0700	  Word	  Public  'CODE'	
+
+
+Procedures,  parameters and locals:
+
+                N a m e                 Type     Value    Attr
+
+AdvanceCursor  . . . . . . . . .	P Near	 0381	  _TEXT	Length= 0017 Public STDCALL
+ConvertTempo . . . . . . . . . .	P Near	 00E7	  _TEXT	Length= 0030 Public STDCALL
+  Tem1 . . . . . . . . . . . . .	L Near	 00F9	  _TEXT	
+Delay  . . . . . . . . . . . . .	P Near	 0000	  _TEXT	Length= 003E Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 0019	  _TEXT	
+  pass . . . . . . . . . . . . .	L Near	 001F	  _TEXT	
+  less . . . . . . . . . . . . .	L Near	 002A	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0039	  _TEXT	
+DrawPixel  . . . . . . . . . . .	P Near	 03D3	  _TEXT	Length= 0019 Public STDCALL
+DumpLongRegs . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+DumpMem  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+DumpRegs . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+GetVideoMode . . . . . . . . . .	P Near	 03B1	  _TEXT	Length= 000D Public STDCALL
+NewLine  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+PlayFrequency  . . . . . . . . .	P Near	 02B1	  _TEXT	Length= 0011 Public STDCALL
+PrintVersion . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadChar . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexByte  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexDigit . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexWord  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadInt  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadLine . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadNoteSpeed  . . . . . . . . .	P Near	 012D	  _TEXT	Length= 009E Public STDCALL
+  HalfNote . . . . . . . . . . .	L Near	 013D	  _TEXT	
+  QuarterNote  . . . . . . . . .	L Near	 0152	  _TEXT	
+  EigthNote  . . . . . . . . . .	L Near	 0167	  _TEXT	
+  SixteenNote  . . . . . . . . .	L Near	 017C	  _TEXT	
+  EndofNotes . . . . . . . . . .	L Near	 018F	  _TEXT	
+ReadPixel  . . . . . . . . . . .	P Near	 03C5	  _TEXT	Length= 0007 Public STDCALL
+Read_note  . . . . . . . . . . .	P Near	 0191	  _TEXT	Length= 0085 Public STDCALL
+  NoteA  . . . . . . . . . . . .	L Near	 0198	  _TEXT	
+  NoteB  . . . . . . . . . . . .	L Near	 01AA	  _TEXT	
+  NoteC  . . . . . . . . . . . .	L Near	 01BC	  _TEXT	
+  NoteD  . . . . . . . . . . . .	L Near	 01CE	  _TEXT	
+  NoteE  . . . . . . . . . . . .	L Near	 01E0	  _TEXT	
+  NoteF  . . . . . . . . . . . .	L Near	 01F2	  _TEXT	
+  NoteG  . . . . . . . . . . . .	L Near	 0204	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0214	  _TEXT	
+RestoreCursor  . . . . . . . . .	P Near	 0368	  _TEXT	Length= 0019 Public STDCALL
+SaveCursor . . . . . . . . . . .	P Near	 0398	  _TEXT	Length= 0019 Public STDCALL
+SetCursor  . . . . . . . . . . .	P Near	 0359	  _TEXT	Length= 000F Public STDCALL
+SetPalette . . . . . . . . . . .	P Near	 03EC	  _TEXT	Length= 000B Public STDCALL
+SetPalleteColor  . . . . . . . .	P Near	 03F7	  _TEXT	Length= 0015 Public STDCALL
+SetVideoMode . . . . . . . . . .	P Near	 03BE	  _TEXT	Length= 0007 Public STDCALL
+SkipToEOL  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+SpeakerOff . . . . . . . . . . .	P Near	 0122	  _TEXT	Length= 000B Public STDCALL
+SpeakerOn  . . . . . . . . . . .	P Near	 0117	  _TEXT	Length= 000B Public STDCALL
+  done . . . . . . . . . . . . .	L Near	 011F	  _TEXT	
+TraceRegisterChanges . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+Version  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteBit . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteChar  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexByte . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexDigit  . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexLong . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexWord . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteInt . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WritePixel . . . . . . . . . . .	P Near	 03CC	  _TEXT	Length= 0007 Public STDCALL
+WriteString  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteUInt  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+drawBvert  . . . . . . . . . . .	P Near	 058D	  _TEXT	Length= 0013 Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 0595	  _TEXT	
+  loopcond . . . . . . . . . . .	L Near	 059A	  _TEXT	
+drawGVert  . . . . . . . . . . .	P Near	 06DF	  _TEXT	Length= 0014 Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 06E6	  _TEXT	
+  loopcond . . . . . . . . . . .	L Near	 06EB	  _TEXT	
+drawGreen  . . . . . . . . . . .	P Near	 0675	  _TEXT	Length= 006A Public STDCALL
+drawPiano  . . . . . . . . . . .	P Near	 040C	  _TEXT	Length= 002D Public STDCALL
+drawblack  . . . . . . . . . . .	P Near	 05CD	  _TEXT	Length= 005A Public STDCALL
+drawhori . . . . . . . . . . . .	P Near	 0566	  _TEXT	Length= 0014 Public STDCALL
+  top2 . . . . . . . . . . . . .	L Near	 056E	  _TEXT	
+  loopcond2  . . . . . . . . . .	L Near	 0573	  _TEXT	
+drawkeys?  . . . . . . . . . . .	P Near	 054A	  _TEXT	Length= 001C Public STDCALL
+  lp . . . . . . . . . . . . . .	L Near	 0553	  _TEXT	
+drawkeys . . . . . . . . . . . .	P Near	 0439	  _TEXT	Length= 0111 Public STDCALL
+drawlastblack  . . . . . . . . .	P Near	 05A0	  _TEXT	Length= 002D Public STDCALL
+drawlayout . . . . . . . . . . .	P Near	 0627	  _TEXT	Length= 0029 Public STDCALL
+  top2 . . . . . . . . . . . . .	L Near	 0642	  _TEXT	
+  loopcond2  . . . . . . . . . .	L Near	 0647	  _TEXT	
+drawvert . . . . . . . . . . . .	P Near	 057A	  _TEXT	Length= 0013 Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 0582	  _TEXT	
+  loopcond . . . . . . . . . . .	L Near	 0587	  _TEXT	
+findNoteNature . . . . . . . . .	P Near	 0280	  _TEXT	Length= 0031 Public STDCALL
+  SharpNote  . . . . . . . . . .	L Near	 0284	  _TEXT	
+  FlatNote . . . . . . . . . . .	L Near	 0296	  _TEXT	
+  NormalNote . . . . . . . . . .	L Near	 02A8	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 02AF	  _TEXT	
+getCursor  . . . . . . . . . . .	P Near	 034C	  _TEXT	Length= 000D Public STDCALL
+getfilename  . . . . . . . . . .	P Near	 003E	  _TEXT	Length= 0043 Public STDCALL
+  next . . . . . . . . . . . . .	L Near	 0057	  _TEXT	
+  file . . . . . . . . . . . . .	L Near	 0065	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0078	  _TEXT	
+highlightNote  . . . . . . . . .	P Near	 0650	  _TEXT	Length= 0025 Public STDCALL
+main . . . . . . . . . . . . . .	P Near	 06F3	  _TEXT	Length= 000D Public STDCALL
+openthisfile . . . . . . . . . .	P Near	 0081	  _TEXT	Length= 0025 Public STDCALL
+  err  . . . . . . . . . . . . .	L Near	 0092	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 00A3	  _TEXT	
+playSong . . . . . . . . . . . .	P Near	 02C2	  _TEXT	Length= 008A Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 02D0	  _TEXT	
+  continue . . . . . . . . . . .	L Near	 02EA	  _TEXT	
+  cont . . . . . . . . . . . . .	L Near	 0301	  _TEXT	
+  RestNote . . . . . . . . . . .	L Near	 031D	  _TEXT	
+  LeftShift  . . . . . . . . . .	L Near	 0328	  _TEXT	
+  RightShift . . . . . . . . . .	L Near	 032E	  _TEXT	
+  SpeakerOut . . . . . . . . . .	L Near	 0332	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0346	  _TEXT	
+readANote  . . . . . . . . . . .	P Near	 00BB	  _TEXT	Length= 0017 Public STDCALL
+readTempo  . . . . . . . . . . .	P Near	 00D2	  _TEXT	Length= 0015 Public STDCALL
+read_octave  . . . . . . . . . .	P Near	 0216	  _TEXT	Length= 006A Public STDCALL
+  OCTAVE1  . . . . . . . . . . .	L Near	 021D	  _TEXT	
+  OCTAVE2  . . . . . . . . . . .	L Near	 0226	  _TEXT	
+  OCTAVE3  . . . . . . . . . . .	L Near	 022F	  _TEXT	
+  OCTAVE4  . . . . . . . . . . .	L Near	 0238	  _TEXT	
+  OCTAVE5  . . . . . . . . . . .	L Near	 0241	  _TEXT	
+  OCTAVE6  . . . . . . . . . . .	L Near	 024A	  _TEXT	
+  OCTAVE7  . . . . . . . . . . .	L Near	 0253	  _TEXT	
+  OCTAVE8  . . . . . . . . . . .	L Near	 025C	  _TEXT	
+  OCTAVE9  . . . . . . . . . . .	L Near	 0265	  _TEXT	
+  OCTAVE10 . . . . . . . . . . .	L Near	 026E	  _TEXT	
+  OCTAVE0  . . . . . . . . . . .	L Near	 0277	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 027E	  _TEXT	
+readnewline  . . . . . . . . . .	P Near	 00A6	  _TEXT	Length= 0015 Public STDCALL
+
+
+Symbols:
+
+                N a m e                 Type     Value    Attr
+
+@CodeSize  . . . . . . . . . . .	Number	 0000h	 
+@DataSize  . . . . . . . . . . .	Number	 0000h	 
+@Interface . . . . . . . . . . .	Number	 0003h	 
+@Model . . . . . . . . . . . . .	Number	 0002h	 
+@code  . . . . . . . . . . . . .	Text   	 _TEXT
+@data  . . . . . . . . . . . . .	Text   	 DGROUP
+@fardata?  . . . . . . . . . . .	Text   	 FAR_BSS
+@fardata . . . . . . . . . . . .	Text   	 FAR_DATA
+@stack . . . . . . . . . . . . .	Text   	 DGROUP
+A4 . . . . . . . . . . . . . . .	Word	 0230	  _DATA	
+B4 . . . . . . . . . . . . . . .	Word	 0236	  _DATA	
+BIOS_READCURSOR  . . . . . . . .	Number	 0003h	 
+BIOS_WRITECURSOR . . . . . . . .	Number	 0002h	 
+BIOS . . . . . . . . . . . . . .	Number	 0010h	 
+C4 . . . . . . . . . . . . . . .	Word	 023C	  _DATA	
+CLOSEFILE  . . . . . . . . . . .	Number	 3E00h	 
+CMDTAIL  . . . . . . . . . . . .	Number	 0080h	 
+D4 . . . . . . . . . . . . . . .	Word	 0240	  _DATA	
+DOSEXIT  . . . . . . . . . . . .	Number	 4C00h	 
+DOS  . . . . . . . . . . . . . .	Number	 0021h	 
+E4 . . . . . . . . . . . . . . .	Word	 0246	  _DATA	
+F4 . . . . . . . . . . . . . . .	Word	 024C	  _DATA	
+FREQUENCY  . . . . . . . . . . .	Number	 001234DCh   
+Full_Tempo . . . . . . . . . . .	Word	 010F	  _DATA	
+G4 . . . . . . . . . . . . . . .	Word	 0250	  _DATA	
+LINECOUNT  . . . . . . . . . . .	Word	 010D	  _DATA	
+OLDCURSOR_COLUMN . . . . . . . .	Byte	 025B	  _DATA	
+OLDCURSOR_ROW  . . . . . . . . .	Byte	 0256	  _DATA	
+OPENFILE . . . . . . . . . . . .	Number	 3D00h	 
+OldVideoMode . . . . . . . . . .	Word	 0217	  _DATA	
+PSP  . . . . . . . . . . . . . .	Number	 6200h	 
+READFILE . . . . . . . . . . . .	Number	 3F00h	 
+READY_TIMER  . . . . . . . . . .	Number	 00B6h	 
+SPEAKER_PORT . . . . . . . . . .	Number	 0061h	 
+TIMER_CONTROL_PORT . . . . . . .	Number	 0043h	 
+TIMER_DATA_PORT  . . . . . . . .	Number	 0042h	 
+WAITTIME . . . . . . . . . . . .	Word	 010B	  _DATA	
+buffer . . . . . . . . . . . . .	Byte	 00F4	  _DATA	
+buffsize . . . . . . . . . . . .	Word	 00F2	  _DATA	
+bytesread  . . . . . . . . . . .	Word	 0109	  _DATA	
+cmdbuffer  . . . . . . . . . . .	Word	 0000	  _DATA	
+error  . . . . . . . . . . . . .	Byte	 0219	  _DATA	
+filehandle . . . . . . . . . . .	Word	 00F0	  _DATA	
+filename . . . . . . . . . . . .	Byte	 0111	  _DATA	
+garbageBuffer  . . . . . . . . .	Byte	 00FF	  _DATA	
+noteLocation . . . . . . . . . .	Word	 0215	  _DATA	
+tempo  . . . . . . . . . . . . .	Byte	 00FE	  _DATA	
+
+	   0 Warnings
+	   0 Errors
